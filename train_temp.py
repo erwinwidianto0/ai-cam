@@ -1,8 +1,8 @@
 import sys
 from ultralytics import YOLO
 
-print("Memuat base model yolo11n.pt...")
-model = YOLO("yolo11n.pt")
+print("Memuat base model yolo26n.pt...")
+model = YOLO("yolo26n.pt")
 
 print("Mulai proses pelatihan...")
 model.train(

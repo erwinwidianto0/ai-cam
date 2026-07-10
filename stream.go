@@ -428,18 +428,26 @@ func (sp *StreamProcessor) Start() {
 					// 2. Hitung status memasak dan zona kompor secara lokal
 					personInZone, maxConf := sp.checkPersonInZone(detections, width, height)
 					localFireDetected, localSmokeDetected := false, false
+					localSmokingDetected := false
+					localSleepingDetected := false
 					for _, d := range detections {
 						if d.Confidence >= sp.confThreshold {
 							if d.Label == "fire" {
 								localFireDetected = true
 							} else if d.Label == "smoke" {
 								localSmokeDetected = true
+							} else if d.Label == "smoking" || d.Label == "merokok" || d.Label == "cigarette" {
+								localSmokingDetected = true
+							} else if d.Label == "sleeping" || d.Label == "tidur" {
+								localSleepingDetected = true
 							}
 						}
 					}
 
-					// 3. Update alarm status lokal (api/asap)
+					// 3. Update alarm status lokal (api/asap, merokok, tidur)
 					sp.statusMu.Lock()
+					
+					// Alarm Kebakaran
 					if localFireDetected || localSmokeDetected {
 						if !sp.geminiFireAlert {
 							sp.geminiFireAlert = true
@@ -465,12 +473,42 @@ func (sp *StreamProcessor) Start() {
 						if sp.geminiFireAlert {
 							sp.geminiFireAlert = false
 						}
-						if !sp.isCooking {
-							if localPersonDetected {
-								sp.geminiDescription = "Sistem lokal berjalan normal. Terdeteksi manusia, area aman dari api dan asap."
-							} else {
-								sp.geminiDescription = "Sistem lokal berjalan normal. Area aman (tidak terdeteksi manusia, api, atau asap)."
-							}
+					}
+
+					// Alarm Merokok Lokal
+					if localSmokingDetected {
+						if !sp.geminiSmokingAlert {
+							sp.geminiSmokingAlert = true
+							sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi orang merokok di area dilarang!"
+							log.Println("WARNING!!! DETEKSI MEROKOK LOKAL AKTIF!")
+							go sp.saveEventSnapshot(jpegData, "smoking")
+						}
+					} else {
+						if sp.geminiSmokingAlert {
+							sp.geminiSmokingAlert = false
+						}
+					}
+
+					// Alarm Tidur/Jatuh Lokal
+					if localSleepingDetected {
+						if !sp.geminiSleepingAlert {
+							sp.geminiSleepingAlert = true
+							sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi petugas tidur atau terkapar!"
+							log.Println("WARNING!!! DETEKSI PETUGAS TIDUR LOKAL AKTIF!")
+							go sp.saveEventSnapshot(jpegData, "sleeping")
+						}
+					} else {
+						if sp.geminiSleepingAlert {
+							sp.geminiSleepingAlert = false
+						}
+					}
+
+					// Fallback deskripsi jika tidak sedang memasak dan tidak ada alarm aktif
+					if !sp.isCooking && !localFireDetected && !localSmokeDetected && !localSmokingDetected && !localSleepingDetected {
+						if localPersonDetected {
+							sp.geminiDescription = "Sistem lokal berjalan normal. Terdeteksi manusia, area aman dari api dan asap."
+						} else {
+							sp.geminiDescription = "Sistem lokal berjalan normal. Area aman (tidak terdeteksi manusia, api, atau asap)."
 						}
 					}
 					sp.statusMu.Unlock()
