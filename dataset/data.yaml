@@ -1,4 +1,5 @@
-train: ./dataset/images/train
-val: ./dataset/images/train
-nc: 3
-names: ['api', 'pemadam api', 'asap']
+path: ./dataset
+train: images/train
+val: images/train
+nc: 4
+names: ['api', 'pemadam api', 'asap', 'manusia']

@@ -199,6 +199,7 @@ func main() {
 	http.HandleFunc("/api/label/images", handleAPILabelImages)
 	http.HandleFunc("/api/label/save", handleAPILabelSave)
 	http.HandleFunc("/api/label/upload", handleAPILabelUpload)
+	http.HandleFunc("/api/label/images-labeled", handleAPILabelImagesLabeled)
 	http.HandleFunc("/api/train/start", handleAPITrainStart)
 	http.HandleFunc("/api/train/status", handleAPITrainStatus)
 	http.HandleFunc("/api/train/stop", handleAPITrainStop)
@@ -730,11 +731,20 @@ func handleAPILabelSave(w http.ResponseWriter, r *http.Request) {
 
 	srcImgPath := filepath.Join("dataset", "raw", req.Filename)
 	dstImgPath := filepath.Join("dataset", "images", "train", req.Filename)
-	err = moveFile(srcImgPath, dstImgPath)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal memindahkan file gambar: %v", err)})
-		return
+	if _, err := os.Stat(srcImgPath); err == nil {
+		err = moveFile(srcImgPath, dstImgPath)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal memindahkan file gambar: %v", err)})
+			return
+		}
+	} else {
+		// Jika file mentah tidak ada, pastikan file target sudah ada (mode edit)
+		if _, err := os.Stat(dstImgPath); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "File gambar tidak ditemukan di antrean raw maupun training"})
+			return
+		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Berhasil menyimpan label"})
@@ -1032,4 +1042,35 @@ func handleAPILabelUpload(w http.ResponseWriter, r *http.Request) {
 		"message":  fmt.Sprintf("Berhasil mengunggah %d gambar", uploadedCount),
 		"uploaded": uploadedCount,
 	})
+}
+
+func handleAPILabelImagesLabeled(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	files, err := os.ReadDir("dataset/images/train")
+	if err != nil {
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+
+	var fileList []string
+	for _, f := range files {
+		if !f.IsDir() {
+			ext := strings.ToLower(filepath.Ext(f.Name()))
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
+				fileList = append(fileList, f.Name())
+			}
+		}
+	}
+
+	// Jika kosong, kembalikan array kosong bukan null
+	if fileList == nil {
+		fileList = []string{}
+	}
+
+	json.NewEncoder(w).Encode(fileList)
 }

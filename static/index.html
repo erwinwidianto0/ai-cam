@@ -165,8 +165,14 @@
         <main class="tab-layout labeling-grid-layout">
             <!-- Panel Kiri: Antrean Foto Mentah -->
             <div class="panel-files card">
-                <div class="card-header">
-                    <h2>Antrean Foto Mentah</h2>
+                <div class="card-header" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <h2>Kelola Dataset</h2>
+                    </div>
+                    <div style="display: flex; gap: 6px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 8px; width: 100%;">
+                        <button class="nav-tab active" id="btn-show-raw" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Belum Labeled</button>
+                        <button class="nav-tab" id="btn-show-labeled" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Sudah Labeled</button>
+                    </div>
                 </div>
                 <div class="files-list-container" id="raw-files-list">
                     <div class="empty-state">
@@ -833,9 +839,15 @@
                     }
                 });
 
-                // Jika membuka tab labeling, load gambar mentah pertama
+                // Jika membuka tab labeling, load daftar kelas dan muat data
                 if (target === 'tab-labeling') {
-                    fetchRawImages();
+                    fetchClassesList().then(() => {
+                        if (currentViewMode === 'raw') {
+                            fetchRawImages();
+                        } else {
+                            fetchLabeledImages();
+                        }
+                    });
                 }
                 // Jika membuka tab training, load status training
                 if (target === 'tab-training') {
@@ -854,12 +866,58 @@
         const boxesList = document.getElementById('boxes-list');
 
         let rawImages = [];
+        let labeledImages = [];
+        let classesList = []; // cache list of labels from classes.txt
+        let currentViewMode = 'raw'; // 'raw' or 'labeled'
         let currentImageIndex = 0;
-        let drawnBoxes = []; // array of { xMin, yMin, xMax, yMax, label }
+        let drawnBoxes = []; // array of { id, xMin, yMin, xMax, yMax, label }
         let isLabelingDrawing = false;
         let labelingStartX = 0;
         let labelingStartY = 0;
         let activeBoxDiv = null;
+
+        // Fetch daftar kelas dari backend (classes.txt)
+        async function fetchClassesList() {
+            try {
+                const res = await fetch('/dataset/classes.txt');
+                if (res.ok) {
+                    const text = await res.text();
+                    classesList = text.split('\n').map(l => l.trim()).filter(l => l !== '');
+                }
+            } catch (err) {
+                console.error("Gagal membaca classes.txt: ", err);
+            }
+        }
+
+        // Toggles untuk menu dataset
+        const btnShowRaw = document.getElementById('btn-show-raw');
+        const btnShowLabeled = document.getElementById('btn-show-labeled');
+
+        if (btnShowRaw) {
+            btnShowRaw.addEventListener('click', () => {
+                currentViewMode = 'raw';
+                btnShowRaw.classList.add('active');
+                btnShowRaw.style.background = 'var(--accent-gradient)';
+                if (btnShowLabeled) {
+                    btnShowLabeled.classList.remove('active');
+                    btnShowLabeled.style.background = 'transparent';
+                }
+                fetchRawImages();
+            });
+        }
+
+        if (btnShowLabeled) {
+            btnShowLabeled.addEventListener('click', () => {
+                currentViewMode = 'labeled';
+                btnShowLabeled.classList.add('active');
+                btnShowLabeled.style.background = 'var(--accent-gradient)';
+                if (btnShowRaw) {
+                    btnShowRaw.classList.remove('active');
+                    btnShowRaw.style.background = 'transparent';
+                }
+                fetchLabeledImages();
+            });
+        }
 
         // Fetch daftar gambar mentah di dataset/raw
         async function fetchRawImages() {
@@ -880,7 +938,12 @@
                 } else {
                     labelingCountBadge.textContent = `0 Gambar Tersisa`;
                     labelingCountBadge.className = 'header-action-badge alert-idle';
+                    
+                    // Kembalikan tampilan kosong ke default
                     labelingEmptyState.style.display = 'flex';
+                    labelingEmptyState.querySelector('h3').textContent = "Folder dataset/raw Kosong";
+                    labelingEmptyState.querySelector('p').innerHTML = 'Letakkan file foto mentah (.jpg/.jpeg/.png) di folder <strong>dataset/raw/</strong> atau klik tombol di bawah untuk mengunggah lewat web.';
+                    
                     labelingImage.style.display = 'none';
                     labelingDrawLayer.style.display = 'none';
                     drawnBoxes = [];
@@ -892,6 +955,42 @@
             }
         }
 
+        // Fetch daftar gambar yang sudah di-labeli di dataset/images/train
+        async function fetchLabeledImages() {
+            try {
+                const res = await fetch('/api/label/images-labeled');
+                labeledImages = await res.json();
+                
+                if (labeledImages && labeledImages.length > 0) {
+                    labelingCountBadge.textContent = `${labeledImages.length} Labeled`;
+                    labelingCountBadge.className = 'header-action-badge alert-idle';
+                    labelingEmptyState.style.display = 'none';
+                    labelingImage.style.display = 'block';
+                    labelingDrawLayer.style.display = 'block';
+                    
+                    // Load gambar terlabeli pertama
+                    currentImageIndex = 0;
+                    loadLabeledImage(labeledImages[currentImageIndex]);
+                } else {
+                    labelingCountBadge.textContent = `0 Labeled`;
+                    labelingCountBadge.className = 'header-action-badge alert-idle';
+                    
+                    // Set tampilan kosong khusus folder labeled kosong
+                    labelingEmptyState.style.display = 'flex';
+                    labelingEmptyState.querySelector('h3').textContent = "Belum Ada Gambar Terlabeli";
+                    labelingEmptyState.querySelector('p').textContent = "Mulailah melabeli gambar pada tab 'Belum Labeled' untuk mengisi dataset.";
+                    
+                    labelingImage.style.display = 'none';
+                    labelingDrawLayer.style.display = 'none';
+                    drawnBoxes = [];
+                    renderBoxesList();
+                    renderRawFilesList();
+                }
+            } catch (err) {
+                console.error("Gagal membaca folder labeled: ", err);
+            }
+        }
+
         function loadLabelingImage(filename) {
             labelingImage.src = `/dataset/raw/${filename}`;
             drawnBoxes = [];
@@ -900,21 +999,107 @@
             renderRawFilesList();
         }
 
-        // Render daftar antrean file mentah di panel kiri
+        async function loadLabeledImage(filename) {
+            labelingImage.src = `/dataset/images/train/${filename}`;
+            drawnBoxes = [];
+            labelingDrawLayer.innerHTML = '';
+            
+            // Baca file label .txt yang sesuai
+            const nameWithoutExt = filename.substring(0, filename.lastIndexOf('.'));
+            const txtPath = `/dataset/labels/train/${nameWithoutExt}.txt`;
+            
+            try {
+                const res = await fetch(txtPath);
+                if (res.ok) {
+                    const text = await res.text();
+                    parseYOLOLabelFile(text);
+                }
+            } catch (err) {
+                console.error("Gagal memuat label .txt: ", err);
+            }
+
+            renderBoxesList();
+            renderRawFilesList();
+        }
+
+        function parseYOLOLabelFile(text) {
+            const lines = text.split('\n');
+            
+            lines.forEach((line, idx) => {
+                const cleanLine = line.trim();
+                if (!cleanLine) return;
+
+                const parts = cleanLine.split(/\s+/);
+                if (parts.length < 5) return;
+
+                const classID = parseInt(parts[0]);
+                const xCenter = parseFloat(parts[1]);
+                const yCenter = parseFloat(parts[2]);
+                const width = parseFloat(parts[3]);
+                const height = parseFloat(parts[4]);
+
+                // Hitung kembali koordinat absolut relatif (%)
+                const left = xCenter - (width / 2);
+                const top = yCenter - (height / 2);
+                const right = xCenter + (width / 2);
+                const bottom = yCenter + (height / 2);
+
+                const boxId = Date.now() + idx;
+                const labelName = classesList[classID] || `Class-${classID}`;
+
+                drawnBoxes.push({
+                    id: boxId,
+                    xMin: left,
+                    yMin: top,
+                    xMax: right,
+                    yMax: bottom,
+                    label: labelName
+                });
+            });
+
+            // Gambar kotak ke canvas draw layer
+            renderBoxesOnCanvas();
+        }
+
+        function renderBoxesOnCanvas() {
+            labelingDrawLayer.innerHTML = '';
+            
+            drawnBoxes.forEach(box => {
+                const rectDiv = document.createElement('div');
+                rectDiv.className = 'drawn-box-rect';
+                rectDiv.setAttribute('id', `box-rect-${box.id}`);
+                
+                const left = box.xMin * 100;
+                const top = box.yMin * 100;
+                const width = (box.xMax - box.xMin) * 100;
+                const height = (box.yMax - box.yMin) * 100;
+
+                rectDiv.style.left = `${left}%`;
+                rectDiv.style.top = `${top}%`;
+                rectDiv.style.width = `${width}%`;
+                rectDiv.style.height = `${height}%`;
+
+                labelingDrawLayer.appendChild(rectDiv);
+            });
+        }
+
+        // Render daftar antrean file mentah/terlabeli di panel kiri
         function renderRawFilesList() {
             const rawFilesList = document.getElementById('raw-files-list');
             if (!rawFilesList) return;
 
-            if (!rawImages || rawImages.length === 0) {
+            const files = currentViewMode === 'raw' ? rawImages : labeledImages;
+
+            if (!files || files.length === 0) {
                 rawFilesList.innerHTML = `
                     <div class="empty-state">
-                        <p>Belum ada file. Silakan klik tombol Upload Foto.</p>
+                        <p>${currentViewMode === 'raw' ? 'Belum ada file mentah. Silakan klik tombol Upload.' : 'Belum ada gambar terlabeli.'}</p>
                     </div>`;
                 return;
             }
 
             rawFilesList.innerHTML = '';
-            rawImages.forEach((filename, index) => {
+            files.forEach((filename, index) => {
                 const item = document.createElement('div');
                 item.className = 'file-item';
                 if (index === currentImageIndex) {
@@ -930,7 +1115,11 @@
 
                 item.addEventListener('click', () => {
                     currentImageIndex = index;
-                    loadLabelingImage(filename);
+                    if (currentViewMode === 'raw') {
+                        loadLabelingImage(filename);
+                    } else {
+                        loadLabeledImage(filename);
+                    }
                 });
 
                 rawFilesList.appendChild(item);
@@ -1003,6 +1192,12 @@
             const boxId = Date.now();
             activeBoxDiv.setAttribute('id', `box-rect-${boxId}`);
             
+            // Konversikan ke persentase agar responsif terhadap ukuran kontainer
+            activeBoxDiv.style.left = `${xMin * 100}%`;
+            activeBoxDiv.style.top = `${yMin * 100}%`;
+            activeBoxDiv.style.width = `${(xMax - xMin) * 100}%`;
+            activeBoxDiv.style.height = `${(yMax - yMin) * 100}%`;
+
             drawnBoxes.push({
                 id: boxId,
                 xMin: xMin,
@@ -1054,18 +1249,17 @@
         };
 
         window.deleteSingleBox = function(boxId) {
-            // Hapus dari data array
             drawnBoxes = drawnBoxes.filter(b => b.id !== boxId);
-            // Hapus dari tampilan kanvas
             const el = document.getElementById(`box-rect-${boxId}`);
             if (el) el.remove();
-            // Re-render daftar kanan
             renderBoxesList();
         };
 
         // Simpan koordinat label & gambar kustom ke folder train
         document.getElementById('btn-label-save').addEventListener('click', async () => {
-            if (rawImages.length === 0) return;
+            const files = currentViewMode === 'raw' ? rawImages : labeledImages;
+            if (files.length === 0) return;
+            
             if (drawnBoxes.length === 0) {
                 alert("Gambar belum dilabeli! Minimal lukis satu kotak pembatas terlebih dahulu.");
                 return;
@@ -1079,7 +1273,7 @@
             }
 
             const payload = {
-                filename: rawImages[currentImageIndex],
+                filename: files[currentImageIndex],
                 boxes: drawnBoxes.map(b => ({
                     label: b.label,
                     x_min: b.xMin,
@@ -1098,8 +1292,15 @@
                 const result = await res.json();
                 
                 if (result.status === 'success') {
-                    // Berhasil simpan, muat gambar mentah berikutnya
-                    fetchRawImages();
+                    // Update classes cache
+                    await fetchClassesList();
+                    
+                    // Berhasil simpan, muat gambar berikutnya
+                    if (currentViewMode === 'raw') {
+                        fetchRawImages();
+                    } else {
+                        fetchLabeledImages();
+                    }
                 } else {
                     alert(`Gagal menyimpan label: ${result.message}`);
                 }

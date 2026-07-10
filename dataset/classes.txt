@@ -1,3 +1,4 @@
 api
 pemadam api
 asap
+manusia
