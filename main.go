@@ -498,7 +498,7 @@ func handleAPITestGemini(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Panggil Gemini API Endpoint
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=%s", reqBody.GeminiAPIKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", reqBody.GeminiAPIKey)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1149,7 +1149,7 @@ Contoh format JSON yang diharapkan:
 		return nil, fmt.Errorf("failed to marshal Gemini request: %w", err)
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=%s", apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
 	if err != nil {
