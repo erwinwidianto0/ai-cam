@@ -183,6 +183,14 @@ func reloadLocalAIService() error {
 
 // checkAndTriggerAutoTraining memeriksa apakah dataset baru bertambah kelipatan 10 untuk memicu training otomatis
 func checkAndTriggerAutoTraining() {
+	// Pengawal: Jangan lakukan pengecekan jika proses training sedang aktif berjalan di background
+	trainingMu.Lock()
+	isTraining := trainingActive
+	trainingMu.Unlock()
+	if isTraining {
+		return
+	}
+
 	configMu.Lock()
 	lastTrained := config.LastTrainedCount
 	configMu.Unlock()
@@ -646,9 +654,11 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldGeminiAPIKey := config.GeminiAPIKey
 		oldGeminiPrompt := config.GeminiPrompt
 		currentPort := config.Port // Ambil port aktif
+		lastTrainedCount := config.LastTrainedCount // Ambil last trained count aktif agar tidak ter-reset
 		configMu.RUnlock()
 
 		newCfg.Port = currentPort // Kembalikan port agar tidak kosong
+		newCfg.LastTrainedCount = lastTrainedCount // Kembalikan last trained count aktif
 
 		// Simpan konfigurasi baru
 		if err := saveConfig(newCfg); err != nil {
