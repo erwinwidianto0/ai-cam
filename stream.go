@@ -22,6 +22,20 @@ type StreamProcessor struct {
 	aiClient      *AIClient
 	db            *DBManager
 	confThreshold float64
+
+	// Koordinat zona memasak (ROI) dalam persentase (0.0 - 1.0)
+	zoneXMin float64
+	zoneYMin float64
+	zoneXMax float64
+	zoneYMax float64
+
+	// Logika pendeteksi aktivitas memasak
+	cookingTriggerSecs int
+	inZoneStartTime    time.Time
+	isCooking          bool
+	lastSeenInZone     time.Time
+	kitchenStatus      string // "Kosong", "Memasak"
+	secondsInZone      int
 	
 	clients       map[chan []byte]bool
 	clientsMu     sync.Mutex
@@ -39,15 +53,28 @@ type StreamProcessor struct {
 }
 
 // NewStreamProcessor membuat instansi baru StreamProcessor
-func NewStreamProcessor(rtspURL string, aiClient *AIClient, db *DBManager, confThreshold float64) *StreamProcessor {
+func NewStreamProcessor(
+	rtspURL string, 
+	aiClient *AIClient, 
+	db *DBManager, 
+	confThreshold float64,
+	zxMin, zyMin, zxMax, zyMax float64,
+	cookingTriggerSecs int,
+) *StreamProcessor {
 	return &StreamProcessor{
-		rtspURL:       rtspURL,
-		aiClient:      aiClient,
-		db:            db,
-		confThreshold: confThreshold,
-		clients:       make(map[chan []byte]bool),
-		stopChan:      make(chan struct{}),
-		aiStatus:      "Unknown",
+		rtspURL:            rtspURL,
+		aiClient:           aiClient,
+		db:                 db,
+		confThreshold:      confThreshold,
+		zoneXMin:           zxMin,
+		zoneYMin:           zyMin,
+		zoneXMax:           zxMax,
+		zoneYMax:           zyMax,
+		cookingTriggerSecs: cookingTriggerSecs,
+		kitchenStatus:      "Kosong",
+		clients:            make(map[chan []byte]bool),
+		stopChan:           make(chan struct{}),
+		aiStatus:           "Unknown",
 	}
 }
 
@@ -127,13 +154,12 @@ func (sp *StreamProcessor) Start() {
 				log.Println("Memulai koneksi ke RTSP stream via FFmpeg...")
 				
 				// Argumen ffmpeg untuk mengambil stream RTSP dan menyajikan gambar JPEG di stdout
-				// -rtsp_transport tcp: memaksa menggunakan TCP agar tidak ada frame drop
 				cmd := exec.Command(ffmpegPath,
 					"-rtsp_transport", "tcp",
 					"-i", sp.rtspURL,
 					"-f", "image2pipe",
 					"-vcodec", "mjpeg",
-					"-q:v", "4", // Kualitas gambar 1-31 (semakin kecil semakin bagus)
+					"-q:v", "4", // Kualitas gambar
 					"-pix_fmt", "yuvj420p",
 					"-",
 				)
@@ -151,7 +177,7 @@ func (sp *StreamProcessor) Start() {
 					continue
 				}
 
-				// Scanner dengan buffer besar (maks 2MB) untuk mendukung resolusi gambar HD
+				// Scanner dengan buffer besar (maks 2MB)
 				scanner := bufio.NewScanner(stdout)
 				buf := make([]byte, 1024*1024)
 				scanner.Buffer(buf, 2*1024*1024)
@@ -183,7 +209,7 @@ func (sp *StreamProcessor) Start() {
 						fpsLastTime = now
 					}
 
-					// Batasi pengiriman ke AI (misal 5 frame per detik / setiap 200ms)
+					// Batasi pengiriman ke AI (sekitar 5 frame per detik / setiap 200ms)
 					var detections []AIDetection
 					var aiErr error
 					now := time.Now()
@@ -203,37 +229,18 @@ func (sp *StreamProcessor) Start() {
 						}
 					}
 
-					// Gambar bounding box pada gambar jika ada objek terdeteksi
-					processedJPEG := jpegData
-					var personDetected bool
-					var maxConf float64
-
-					// Hanya gambar box jika AI online dan mendeteksi sesuatu
-					if aiErr == nil && len(detections) > 0 {
-						processedJPEG, personDetected, maxConf = sp.drawBoundingBoxes(jpegData, detections)
+					// Proses logika deteksi ROI dapur & penggambaran bounding box
+					var processedJPEG []byte
+					if aiErr == nil {
+						processedJPEG, _, _ = sp.drawBoundingBoxes(jpegData, detections)
+					} else {
+						// Fallback ketika AI Offline: tetap update timer zona (agar tidak nge-lock)
+						// dan tetap gambar garis zona di layar video
+						processedJPEG, _, _ = sp.drawBoundingBoxes(jpegData, nil)
 						
-						// Jika ada manusia terdeteksi dengan confidence di atas threshold, catat ke database
-						if personDetected && maxConf >= sp.confThreshold {
-							// Simpan snapshot
-							snapshotFilename := fmt.Sprintf("person_%s.jpg", time.Now().Format("20060102_150405_000"))
-							snapshotPath := filepath.Join("snapshots", snapshotFilename)
-							
-							// Pastikan folder snapshots ada
-							os.MkdirAll("snapshots", 0755)
-							
-							err := os.WriteFile(snapshotPath, processedJPEG, 0644)
-							if err == nil {
-								// Log ke SQLite
-								_, dbErr := sp.db.LogDetection("person", maxConf, snapshotFilename)
-								if dbErr != nil {
-									log.Printf("Gagal mencatat deteksi ke DB: %v", dbErr)
-								}
-							} else {
-								log.Printf("Gagal menyimpan file snapshot: %v", err)
-							}
+						if runAI {
+							log.Printf("Layanan AI offline: %v", aiErr)
 						}
-					} else if aiErr != nil && runAI {
-						log.Printf("Layanan AI offline: %v", aiErr)
 					}
 
 					// Simpan frame terbaru untuk klien baru
@@ -297,7 +304,7 @@ func (sp *StreamProcessor) broadcast(frame []byte) {
 	}
 }
 
-// drawBoundingBoxes menggambar kotak pembatas di frame JPEG jika terdeteksi manusia
+// drawBoundingBoxes menggambar kotak pembatas objek dan zona memasak pada frame JPEG
 func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDetection) ([]byte, bool, float64) {
 	// Decode gambar JPEG ke image.Image
 	srcImg, err := jpeg.Decode(bytes.NewReader(jpegData))
@@ -306,36 +313,33 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 	}
 
 	bounds := srcImg.Bounds()
+	width := float64(bounds.Max.X - bounds.Min.X)
+	height := float64(bounds.Max.Y - bounds.Min.Y)
+
 	rgbaImg := image.NewRGBA(bounds)
 	draw.Draw(rgbaImg, bounds, srcImg, bounds.Min, draw.Src)
 
-	personDetected := false
+	personInZone := false
 	maxConf := 0.0
 
 	// Definisikan warna-warna box
-	colorRed := color.RGBA{R: 239, G: 68, B: 68, A: 255}   // Merah cerah untuk manusia
-	colorYellow := color.RGBA{R: 245, G: 158, B: 11, A: 255} // Kuning untuk objek lain
+	colorRed := color.RGBA{R: 239, G: 68, B: 68, A: 255}   // Merah cerah
+	colorYellow := color.RGBA{R: 245, G: 158, B: 11, A: 255} // Kuning
+	colorBlue := color.RGBA{R: 59, G: 130, B: 246, A: 255}   // Biru
 
+	// Proses setiap objek terdeteksi
 	for _, det := range detections {
-		// Filter deteksi: kita utamakan "person" (manusia)
 		isPerson := det.Label == "person"
 		
 		if det.Confidence < sp.confThreshold {
 			continue
 		}
 
-		if isPerson {
-			personDetected = true
-			if det.Confidence > maxConf {
-				maxConf = det.Confidence
-			}
-		}
-
-		// Koordinat box
+		// Koordinat box absolut
 		x1, y1 := int(det.Box[0]), int(det.Box[1])
 		x2, y2 := int(det.Box[2]), int(det.Box[3])
 
-		// Pastikan koordinat tidak melampaui batas gambar
+		// Batasi koordinat ke dalam layar gambar
 		if x1 < 0 { x1 = 0 }
 		if y1 < 0 { y1 = 0 }
 		if x2 >= bounds.Max.X { x2 = bounds.Max.X - 1 }
@@ -345,33 +349,150 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		var boxColor color.Color = colorYellow
 		if isPerson {
 			boxColor = colorRed
+
+			// LOGIKA DETEKSI ZONA MEMASAK (ROI):
+			// Kita ambil posisi kaki orang tersebut (tengah bawah dari bounding box):
+			// px = (x1 + x2) / 2
+			// py = y2
+			px := (x1 + x2) / 2
+			py := y2
+
+			// Normalisasikan koordinat absolut menjadi koordinat rasio persen (0.0 - 1.0)
+			normX := float64(px) / width
+			normY := float64(py) / height
+
+			// Cek apakah koordinat kaki masuk ke dalam area Zona ROI
+			if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
+				personInZone = true
+				if det.Confidence > maxConf {
+					maxConf = det.Confidence
+				}
+			}
 		}
 
-		// Gambar kotak pembatas dengan ketebalan 3 piksel
+		// Gambar kotak pembatas objek
 		drawBox(rgbaImg, x1, y1, x2, y2, boxColor, 3)
 	}
 
-	// Jika manusia terdeteksi, tambahkan banner ALERT di kiri atas gambar
-	if personDetected {
-		// Gambar banner latar belakang merah semi transparan
-		// 15, 15 ke 250, 50
-		bannerColor := color.RGBA{R: 220, G: 38, B: 38, A: 255}
-		drawFilledRect(rgbaImg, 15, 15, 230, 48, bannerColor)
+	// STATE MACHINE DETEKSI MEMASAK
+	now := time.Now()
+	if personInZone {
+		if sp.inZoneStartTime.IsZero() {
+			sp.inZoneStartTime = now
+		}
+		sp.lastSeenInZone = now
 		
-		// Gambar teks banner sederhana (simbol berupa kotak putih kecil)
-		drawFilledRect(rgbaImg, 25, 25, 38, 38, color.White)
-		// Kita tidak menggunakan parser font ttf agar program tetap ringan dan 100% andal di Windows.
-		// Banner merah cerah sudah menjadi indikator visual yang sangat kuat.
+		// Hitung durasi saat ini berada di dalam zona kompor
+		elapsed := now.Sub(sp.inZoneStartTime)
+		sp.secondsInZone = int(elapsed.Seconds())
+		
+		// Jika berada dalam zona melebihi batas waktu kompor, pemicu status memasak aktif
+		if sp.secondsInZone >= sp.cookingTriggerSecs {
+			if !sp.isCooking {
+				sp.isCooking = true
+				sp.kitchenStatus = "Memasak"
+				
+				// PENTING: Jalankan penyimpanan snapshot & log ke database secara asinkron
+				go sp.saveCookingSnapshot(jpegData, maxConf)
+			}
+		}
+	} else {
+		// Jika tidak ada orang di dalam zona
+		if !sp.inZoneStartTime.IsZero() {
+			// Berikan toleransi waktu 3 detik (grace period) jika deteksi terputus sesaat
+			if now.Sub(sp.lastSeenInZone) >= 3*time.Second {
+				sp.inZoneStartTime = time.Time{}
+				sp.isCooking = false
+				sp.kitchenStatus = "Kosong"
+				sp.secondsInZone = 0
+			}
+		} else {
+			sp.kitchenStatus = "Kosong"
+			sp.secondsInZone = 0
+		}
 	}
+
+	// GAMBAR KOTAK ZONA MEMASAK (ROI)
+	// Ubah koordinat rasio ROI kembali menjadi koordinat absolut piksel gambar
+	zx1 := int(sp.zoneXMin * width)
+	zy1 := int(sp.zoneYMin * height)
+	zx2 := int(sp.zoneXMax * width)
+	zy2 := int(sp.zoneYMax * height)
+
+	// Warna kotak zona:
+	// - Merah: Jika status memasak aktif terdeteksi
+	// - Kuning: Jika ada orang masuk zona, tapi belum memicu durasi threshold
+	// - Biru: Jika zona kosong
+	var zoneColor color.Color = colorBlue
+	if sp.isCooking {
+		zoneColor = colorRed
+	} else if personInZone {
+		zoneColor = colorYellow
+	}
+
+	// Gambar kotak zona tipis
+	drawBox(rgbaImg, zx1, zy1, zx2, zy2, zoneColor, 2)
+	
+	// Gambar label tag "ZONA MEMASAK" di atas kotak zona
+	drawFilledRect(rgbaImg, zx1, zy1, zx1+100, zy1+18, zoneColor)
+
+	// GAMBAR BANNER STATUS DAPUR DI KIRI ATAS FRAME
+	// Banner akan memvisualisasikan status saat ini agar terekam pada video
+	bannerColor := color.RGBA{R: 75, G: 85, B: 99, A: 255} // Abu-abu default
+	if sp.isCooking {
+		bannerColor = color.RGBA{R: 220, G: 38, B: 38, A: 255} // Merah
+	} else if personInZone {
+		bannerColor = color.RGBA{R: 217, G: 119, B: 6, A: 255} // Oranye/Kuning tua
+	}
+	
+	// Gambar latar banner
+	drawFilledRect(rgbaImg, 15, 15, 290, 48, bannerColor)
+	// Gambar indikator ikon status (kotak putih di dalam banner)
+	drawFilledRect(rgbaImg, 25, 25, 38, 38, color.White)
 
 	// Re-encode ke JPEG
 	var buf bytes.Buffer
 	err = jpeg.Encode(&buf, rgbaImg, &jpeg.Options{Quality: 80})
 	if err != nil {
-		return jpegData, personDetected, maxConf
+		return jpegData, personInZone, maxConf
 	}
 
-	return buf.Bytes(), personDetected, maxConf
+	return buf.Bytes(), personInZone, maxConf
+}
+
+// saveCookingSnapshot menyimpan snapshot frame yang digambar box ke disk & log ke database
+func (sp *StreamProcessor) saveCookingSnapshot(jpegData []byte, conf float64) {
+	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
+	sp.currentFrameMu.RLock()
+	processedJPEG := make([]byte, len(sp.currentFrame))
+	copy(processedJPEG, sp.currentFrame)
+	sp.currentFrameMu.RUnlock()
+
+	// Fallback jika buffer frame belum siap
+	if len(processedJPEG) == 0 {
+		processedJPEG = jpegData
+	}
+
+	// Nama file unik dengan timestamp
+	snapshotFilename := fmt.Sprintf("cooking_%s.jpg", time.Now().Format("20060102_150405_000"))
+	snapshotPath := filepath.Join("snapshots", snapshotFilename)
+
+	// Pastikan folder snapshots ada
+	os.MkdirAll("snapshots", 0755)
+
+	err := os.WriteFile(snapshotPath, processedJPEG, 0644)
+	if err != nil {
+		log.Printf("Gagal menyimpan file snapshot memasak: %v", err)
+		return
+	}
+
+	// Catat ke database SQLite
+	_, dbErr := sp.db.LogDetection("cooking", conf, snapshotFilename)
+	if dbErr != nil {
+		log.Printf("Gagal mencatat log memasak ke SQLite: %v", dbErr)
+	} else {
+		log.Printf("DETEKSI MEMASAK AKTIF! Foto disimpan: %s", snapshotFilename)
+	}
 }
 
 // drawBox menggambar garis batas kotak di gambar RGBA

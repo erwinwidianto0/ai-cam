@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI-CAM | CCTV Person Detection & Analytics</title>
+    <title>AI-CAM | CCTV Kitchen Cooking Analytics</title>
     <!-- Google Fonts: Inter & Outfit -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,14 +30,14 @@
                     </svg>
                 </div>
                 <div class="logo-text">
-                    <h1>AI-CAM</h1>
-                    <span>CCTV Inteligensi Buatan</span>
+                    <h1>AI-CAM Kitchen</h1>
+                    <span>Deteksi Orang Memasak Real-Time</span>
                 </div>
             </div>
             <div class="header-actions">
                 <button id="btn-settings" class="btn btn-secondary">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                    Pengaturan
+                    Atur Zona ROI
                 </button>
             </div>
         </header>
@@ -49,19 +49,21 @@
                 <div class="card-header">
                     <div class="title-with-status">
                         <span class="status-indicator live" id="stream-status-dot"></span>
-                        <h2>Live Stream CCTV</h2>
+                        <h2>Kamera Monitor Dapur (ROI)</h2>
                     </div>
-                    <div class="stream-stats" id="stream-fps-badge">0.0 FPS</div>
+                    <div class="status-badges-group">
+                        <span class="header-action-badge alert-idle" id="kitchen-status-badge">KOSONG</span>
+                        <div class="stream-stats" id="stream-fps-badge">0.0 FPS</div>
+                    </div>
                 </div>
                 <div class="video-container">
-                    <!-- Standard MJPEG streaming via Go handler -->
                     <img id="live-video" src="/stream" alt="Live CCTV Feed" onerror="handleVideoError()">
                     <div class="video-overlay-offline" id="video-offline-msg">
                         <div class="offline-icon">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                         </div>
-                        <h3>Koneksi CCTV Terputus</h3>
-                        <p>Pastikan URL RTSP benar dan perangkat FFmpeg terinstal serta aktif.</p>
+                        <h3>Koneksi Kamera Terputus</h3>
+                        <p>Pastikan alamat RTSP benar dan perangkat FFmpeg terinstal serta aktif.</p>
                     </div>
                 </div>
             </section>
@@ -70,17 +72,18 @@
             <div class="sidebar-grid">
                 <!-- Stats Row -->
                 <section class="stats-panel">
-                    <div class="stat-card card">
-                        <div class="stat-icon purple">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <!-- Dynamic Kitchen Status Card -->
+                    <div class="stat-card card kitchen-status-card">
+                        <div class="stat-icon gray" id="kitchen-status-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
                         </div>
                         <div class="stat-content">
-                            <span class="stat-label">Terdeteksi Hari Ini</span>
-                            <span class="stat-val" id="stat-today">0</span>
+                            <span class="stat-label">Status Dapur</span>
+                            <span class="stat-val text-idle" id="stat-kitchen-status">Kosong</span>
                         </div>
                     </div>
                     <div class="stat-card card">
-                        <div class="stat-icon blue" id="ai-status-icon">
+                        <div class="stat-icon red" id="ai-status-icon">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
                         </div>
                         <div class="stat-content">
@@ -93,7 +96,7 @@
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                         </div>
                         <div class="stat-content">
-                            <span class="stat-label">AI Latency</span>
+                            <span class="stat-label">Kecepatan Analisis (Latency)</span>
                             <span class="stat-val" id="stat-latency">0 ms</span>
                         </div>
                     </div>
@@ -102,11 +105,10 @@
                 <!-- Detections History Log -->
                 <section class="log-card card">
                     <div class="card-header">
-                        <h2>Riwayat Aktivitas Deteksi</h2>
-                        <div class="header-action-badge">Manusia</div>
+                        <h2>Log Aktivitas Dapur</h2>
+                        <div class="header-action-badge text-alert">Memasak</div>
                     </div>
                     <div class="log-container" id="events-log-list">
-                        <!-- Items dynamically loaded -->
                         <div class="empty-state">
                             <p>Belum ada aktivitas terdeteksi.</p>
                         </div>
@@ -120,25 +122,54 @@
     <div id="modal-settings" class="modal-overlay">
         <div class="modal-content card">
             <div class="modal-header">
-                <h2>Konfigurasi CCTV & AI</h2>
+                <h2>Pengaturan Kamera & Zona ROI Kompor</h2>
                 <button class="btn-close-modal" id="btn-close-settings">&times;</button>
             </div>
             <form id="form-settings">
                 <div class="form-group">
                     <label for="rtsp-url">RTSP CCTV URL</label>
-                    <input type="text" id="rtsp-url" name="rtsp_url" required placeholder="rtsp://username:password@ip:port/stream">
-                    <small>Pastikan format URL RTSP didukung oleh FFmpeg (TCP direkomendasikan).</small>
+                    <input type="text" id="rtsp-url" name="rtsp_url" required>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="ai-endpoint">AI Service Endpoint</label>
-                        <input type="text" id="ai-endpoint" name="ai_endpoint" required placeholder="http://127.0.0.1:8000">
+                        <input type="text" id="ai-endpoint" name="ai_endpoint" required>
                     </div>
                     <div class="form-group">
-                        <label for="conf-threshold">Confidence Threshold (0.1 - 1.0)</label>
-                        <input type="number" id="conf-threshold" name="conf_threshold" required step="0.05" min="0.1" max="1.0" value="0.55">
+                        <label for="conf-threshold">Min. Confidence Object (0.1 - 1.0)</label>
+                        <input type="number" id="conf-threshold" name="conf_threshold" required step="0.05" min="0.1" max="1.0">
                     </div>
                 </div>
+                
+                <h3 class="settings-subtitle">Batas Koordinat Zona Memasak (ROI)</h3>
+                <p class="settings-desc">Masukkan nilai antara 0.00 (Kiri/Atas) hingga 1.00 (Kanan/Bawah) untuk menentukan kotak deteksi kompor dapur.</p>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="zone-x-min">X Min (Batas Kiri)</label>
+                        <input type="number" id="zone-x-min" name="zone_x_min" required step="0.05" min="0" max="1.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="zone-y-min">Y Min (Batas Atas)</label>
+                        <input type="number" id="zone-y-min" name="zone_y_min" required step="0.05" min="0" max="1.0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="zone-x-max">X Max (Batas Kanan)</label>
+                        <input type="number" id="zone-x-max" name="zone_x_max" required step="0.05" min="0" max="1.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="zone-y-max">Y Max (Batas Bawah)</label>
+                        <input type="number" id="zone-y-max" name="zone_y_max" required step="0.05" min="0" max="1.0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="cooking-trigger-secs">Durasi Pemicu Memasak (Detik)</label>
+                    <input type="number" id="cooking-trigger-secs" name="cooking_trigger_secs" required min="1" max="60">
+                    <small>Jumlah detik orang berdiri di dalam area untuk mengonfirmasi sedang memasak.</small>
+                </div>
+                
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" id="btn-cancel-settings">Batal</button>
                     <button type="submit" class="btn btn-primary">Simpan & Terapkan</button>
@@ -154,7 +185,7 @@
             <div class="snapshot-display-container">
                 <img id="viewer-img" src="" alt="Snapshot Detail">
                 <div class="snapshot-details" id="viewer-details">
-                    <span class="badge red">MANUSIA TERDETEKSI</span>
+                    <span class="badge red">AKTIVITAS MEMASAK</span>
                     <span id="viewer-time">12:34:56</span>
                     <span id="viewer-confidence">95%</span>
                 </div>
@@ -169,10 +200,11 @@
         const streamStatusDot = document.getElementById('stream-status-dot');
         const streamFpsBadge = document.getElementById('stream-fps-badge');
         
-        const statToday = document.getElementById('stat-today');
+        const statKitchenStatus = document.getElementById('stat-kitchen-status');
+        const kitchenStatusBadge = document.getElementById('kitchen-status-badge');
+        const kitchenStatusIcon = document.getElementById('kitchen-status-icon');
         const statAiStatus = document.getElementById('stat-ai-status');
         const statLatency = document.getElementById('stat-latency');
-        const activeViewers = document.getElementById('active-viewers');
         const eventsLogList = document.getElementById('events-log-list');
 
         const modalSettings = document.getElementById('modal-settings');
@@ -218,13 +250,14 @@
                 videoOfflineMsg.style.display = 'flex';
                 streamStatusDot.className = 'status-indicator offline';
                 streamFpsBadge.textContent = '0.0 FPS';
+                kitchenStatusBadge.textContent = "OFFLINE";
+                kitchenStatusBadge.className = "header-action-badge alert-idle";
             }
         }
 
         // Jalankan reload video jika error
         setInterval(() => {
             if (!isVideoOnline) {
-                // Mencoba memuat kembali stream
                 liveVideo.src = "/stream?t=" + new Date().getTime();
                 liveVideo.style.display = 'block';
                 videoOfflineMsg.style.display = 'none';
@@ -241,6 +274,11 @@
                 document.getElementById('rtsp-url').value = data.rtsp_url;
                 document.getElementById('ai-endpoint').value = data.ai_endpoint;
                 document.getElementById('conf-threshold').value = data.conf_threshold;
+                document.getElementById('zone-x-min').value = data.zone_x_min;
+                document.getElementById('zone-y-min').value = data.zone_y_min;
+                document.getElementById('zone-x-max').value = data.zone_x_max;
+                document.getElementById('zone-y-max').value = data.zone_y_max;
+                document.getElementById('cooking-trigger-secs').value = data.cooking_trigger_secs;
             } catch (err) {
                 console.error("Gagal mengambil konfigurasi: ", err);
             }
@@ -253,7 +291,12 @@
             const payload = {
                 rtsp_url: formData.get('rtsp_url'),
                 ai_endpoint: formData.get('ai_endpoint'),
-                conf_threshold: parseFloat(formData.get('conf_threshold'))
+                conf_threshold: parseFloat(formData.get('conf_threshold')),
+                zone_x_min: parseFloat(formData.get('zone_x_min')),
+                zone_y_min: parseFloat(formData.get('zone_y_min')),
+                zone_x_max: parseFloat(formData.get('zone_x_max')),
+                zone_y_max: parseFloat(formData.get('zone_y_max')),
+                cooking_trigger_secs: parseInt(formData.get('cooking_trigger_secs'))
             };
 
             try {
@@ -265,7 +308,6 @@
                 const result = await response.json();
                 if (result.status === 'success') {
                     hideSettings();
-                    // Paksa memuat ulang video feed setelah pengaturan berubah
                     setTimeout(() => {
                         liveVideo.src = "/stream?t=" + new Date().getTime();
                     }, 1000);
@@ -284,10 +326,33 @@
                 const response = await fetch('/api/stats');
                 const data = await response.json();
 
-                statToday.textContent = data.detections_today;
                 streamFpsBadge.textContent = data.stream_fps + " FPS";
                 statLatency.textContent = data.ai_latency_ms + " ms";
 
+                // Update Status Dapur
+                const status = data.kitchen_status; // "Kosong", "Memasak"
+                const secsInZone = data.seconds_in_zone || 0;
+
+                statKitchenStatus.textContent = status;
+
+                if (status === 'Memasak') {
+                    statKitchenStatus.className = 'stat-val text-cooking';
+                    kitchenStatusBadge.textContent = "SEDANG MEMASAK";
+                    kitchenStatusBadge.className = "header-action-badge alert-active";
+                    kitchenStatusIcon.className = 'stat-icon red-pulse';
+                } else if (secsInZone > 0) {
+                    statKitchenStatus.className = 'stat-val text-warning';
+                    kitchenStatusBadge.textContent = `ADA ORANG DI KOMPOR (${secsInZone}s)`;
+                    kitchenStatusBadge.className = "header-action-badge alert-warning";
+                    kitchenStatusIcon.className = 'stat-icon yellow';
+                } else {
+                    statKitchenStatus.className = 'stat-val text-idle';
+                    kitchenStatusBadge.textContent = "DAPUR KOSONG";
+                    kitchenStatusBadge.className = "header-action-badge alert-idle";
+                    kitchenStatusIcon.className = 'stat-icon gray';
+                }
+
+                // AI Status
                 const aiStatusText = document.getElementById('stat-ai-status');
                 aiStatusText.textContent = data.ai_status;
                 if (data.ai_status === 'Online') {
@@ -322,15 +387,19 @@
                     const timeStr = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     const dateStr = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
                     const confPercent = Math.round(event.confidence * 100) + "%";
+                    
+                    const isCooking = event.label === 'cooking';
+                    const titleStr = isCooking ? 'Sedang Memasak' : 'Manusia Terdeteksi';
+                    const indicatorClass = isCooking ? 'red' : 'yellow';
 
                     const item = document.createElement('div');
                     item.className = 'log-item';
                     item.innerHTML = `
                         <div class="log-info">
-                            <div class="log-indicator red"></div>
+                            <div class="log-indicator ${indicatorClass}"></div>
                             <div class="log-text">
-                                <span class="log-title">Manusia Terdeteksi</span>
-                                <span class="log-subtitle">${dateStr} • ${timeStr} • Confidence: <strong>${confPercent}</strong></span>
+                                <span class="log-title">${titleStr}</span>
+                                <span class="log-subtitle">${dateStr} • ${timeStr} • Akurasi: <strong>${confPercent}</strong></span>
                             </div>
                         </div>
                         <button class="btn-view-snapshot btn btn-secondary" onclick="viewSnapshot('/snapshots/${event.snapshot_path}', '${timeStr}', '${confPercent}')">
@@ -355,7 +424,7 @@
         // Polling Data Dashboard
         fetchStats();
         fetchLog();
-        setInterval(fetchStats, 2000);
+        setInterval(fetchStats, 1000); // Polling stats lebih cepat (1s) agar responsif
         setInterval(fetchLog, 3000);
     </script>
 </body>

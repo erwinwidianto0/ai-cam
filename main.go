@@ -13,10 +13,15 @@ import (
 
 // Config menyimpan pengaturan aplikasi
 type Config struct {
-	RTSPURL       string  `json:"rtsp_url"`
-	AIEndpoint    string  `json:"ai_endpoint"`
-	ConfThreshold float64 `json:"conf_threshold"`
-	Port          string  `json:"port"`
+	RTSPURL            string  `json:"rtsp_url"`
+	AIEndpoint         string  `json:"ai_endpoint"`
+	ConfThreshold      float64 `json:"conf_threshold"`
+	Port               string  `json:"port"`
+	ZoneXMin           float64 `json:"zone_x_min"`
+	ZoneYMin           float64 `json:"zone_y_min"`
+	ZoneXMax           float64 `json:"zone_x_max"`
+	ZoneYMax           float64 `json:"zone_y_max"`
+	CookingTriggerSecs int     `json:"cooking_trigger_secs"`
 }
 
 var (
@@ -37,10 +42,15 @@ func loadConfig() error {
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Konfigurasi default (menggunakan CCTV RTSP Anda)
 		config = Config{
-			RTSPURL:       "rtsp://admin:%40BANDUNGhijau2023@192.168.1.59:554/h264Preview_01_main",
-			AIEndpoint:    "http://127.0.0.1:8000",
-			ConfThreshold: 0.55, // Batas kepercayaan 55%
-			Port:          "8080",
+			RTSPURL:            "rtsp://admin:%40BANDUNGhijau2023@192.168.1.59:554/h264Preview_01_main",
+			AIEndpoint:         "http://127.0.0.1:8000",
+			ConfThreshold:      0.55, // Batas kepercayaan 55%
+			Port:               "8080",
+			ZoneXMin:           0.30,
+			ZoneYMin:           0.20,
+			ZoneXMax:           0.70,
+			ZoneYMax:           0.90,
+			CookingTriggerSecs: 8, // 8 detik berada di kompor untuk memicu deteksi memasak
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -54,7 +64,25 @@ func loadConfig() error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(file, &config)
+	err = json.Unmarshal(file, &config)
+	if err != nil {
+		return err
+	}
+
+	// Tambahkan fallback nilai default jika variabel baru belum ada di config.json
+	if config.ZoneXMax == 0 && config.ZoneYMax == 0 {
+		config.ZoneXMin = 0.30
+		config.ZoneYMin = 0.20
+		config.ZoneXMax = 0.70
+		config.ZoneYMax = 0.90
+		config.CookingTriggerSecs = 8
+		
+		// Simpan perubahan secara diam-diam agar config.json ter-update
+		fileOut, _ := json.MarshalIndent(config, "", "  ")
+		os.WriteFile(configPath, fileOut, 0644)
+	}
+
+	return nil
 }
 
 // saveConfig menyimpan konfigurasi terkini ke file
@@ -93,7 +121,17 @@ func main() {
 
 	// 3. Mulai Processor CCTV
 	aiClient := NewAIClient(config.AIEndpoint)
-	streamProcessor = NewStreamProcessor(config.RTSPURL, aiClient, dbManager, config.ConfThreshold)
+	streamProcessor = NewStreamProcessor(
+		config.RTSPURL, 
+		aiClient, 
+		dbManager, 
+		config.ConfThreshold,
+		config.ZoneXMin,
+		config.ZoneYMin,
+		config.ZoneXMax,
+		config.ZoneYMax,
+		config.CookingTriggerSecs,
+	)
 	streamProcessor.Start()
 	defer streamProcessor.Stop()
 
@@ -218,6 +256,8 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	latency := streamProcessor.aiLatency.Milliseconds()
 	aiStatus := streamProcessor.aiStatus
 	clientsCount := len(streamProcessor.clients)
+	kitchenStatus := streamProcessor.kitchenStatus
+	secondsInZone := streamProcessor.secondsInZone
 	processorMu.Unlock()
 
 	response := map[string]interface{}{
@@ -227,6 +267,8 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		"ai_latency_ms":     latency,
 		"ai_status":         aiStatus,
 		"active_viewers":    clientsCount,
+		"kitchen_status":    kitchenStatus,
+		"seconds_in_zone":   secondsInZone,
 		"timestamp":         time.Now().Format("15:04:05"),
 	}
 
@@ -273,6 +315,11 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldRTSP := config.RTSPURL
 		oldAI := config.AIEndpoint
 		oldThreshold := config.ConfThreshold
+		oldZXMin := config.ZoneXMin
+		oldZYMin := config.ZoneYMin
+		oldZXMax := config.ZoneXMax
+		oldZYMax := config.ZoneYMax
+		oldTriggerSecs := config.CookingTriggerSecs
 		configMu.RUnlock()
 
 		// Simpan konfigurasi baru
@@ -281,15 +328,33 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Jika ada perubahan RTSP URL atau threshold, restart streaming processor secara dinamis
-		if oldRTSP != newCfg.RTSPURL || oldAI != newCfg.AIEndpoint || oldThreshold != newCfg.ConfThreshold {
+		// Jika ada perubahan parameter apapun, restart streaming processor secara dinamis
+		if oldRTSP != newCfg.RTSPURL || 
+			oldAI != newCfg.AIEndpoint || 
+			oldThreshold != newCfg.ConfThreshold ||
+			oldZXMin != newCfg.ZoneXMin ||
+			oldZYMin != newCfg.ZoneYMin ||
+			oldZXMax != newCfg.ZoneXMax ||
+			oldZYMax != newCfg.ZoneYMax ||
+			oldTriggerSecs != newCfg.CookingTriggerSecs {
+			
 			log.Println("Mendeteksi perubahan konfigurasi. Mengatur ulang aliran CCTV...")
 			
 			processorMu.Lock()
 			streamProcessor.Stop()
 			
 			aiClient := NewAIClient(newCfg.AIEndpoint)
-			streamProcessor = NewStreamProcessor(newCfg.RTSPURL, aiClient, dbManager, newCfg.ConfThreshold)
+			streamProcessor = NewStreamProcessor(
+				newCfg.RTSPURL, 
+				aiClient, 
+				dbManager, 
+				newCfg.ConfThreshold,
+				newCfg.ZoneXMin,
+				newCfg.ZoneYMin,
+				newCfg.ZoneXMax,
+				newCfg.ZoneYMax,
+				newCfg.CookingTriggerSecs,
+			)
 			streamProcessor.Start()
 			processorMu.Unlock()
 			

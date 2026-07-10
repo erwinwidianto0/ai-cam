@@ -641,3 +641,118 @@ small {
     background: var(--color-red);
     border-color: var(--color-red);
 }
+
+/* -------------------------------------------------------------
+ * Tambahan Gaya Fase 2: Deteksi Memasak & Zona ROI Dapur
+ * ------------------------------------------------------------- */
+
+.status-badges-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.header-action-badge {
+    padding: 6px 12px;
+    border-radius: 30px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: var(--transition-smooth);
+}
+
+.header-action-badge.alert-active {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--color-red);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+    animation: alert-blink 1s infinite alternate;
+}
+
+.header-action-badge.alert-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--color-yellow);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+}
+
+.header-action-badge.alert-idle {
+    background: rgba(107, 114, 128, 0.12);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+/* Warna Text Dinamis */
+.text-cooking {
+    color: var(--color-red) !important;
+    text-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+}
+
+.text-warning {
+    color: var(--color-yellow) !important;
+}
+
+.text-idle {
+    color: var(--text-secondary) !important;
+}
+
+/* Icon Status Warna & Pulse */
+.stat-icon.red-pulse {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--color-red);
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+    animation: red-pulse-anim 1.5s infinite;
+}
+
+.stat-icon.yellow {
+    background: rgba(245, 158, 11, 0.12);
+    color: var(--color-yellow);
+}
+
+.stat-icon.gray {
+    background: rgba(107, 114, 128, 0.12);
+    color: var(--text-secondary);
+}
+
+/* Pengaturan Subtitle & Deskripsi */
+.settings-subtitle {
+    font-family: var(--font-heading);
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 24px;
+    margin-bottom: 4px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 16px;
+    color: var(--text-primary);
+}
+
+.settings-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+/* Keyframe Animations */
+@keyframes red-pulse-anim {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    }
+}
+
+@keyframes alert-blink {
+    0% {
+        opacity: 0.7;
+    }
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+    }
+}
+
