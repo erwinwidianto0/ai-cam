@@ -320,7 +320,10 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldZXMax := config.ZoneXMax
 		oldZYMax := config.ZoneYMax
 		oldTriggerSecs := config.CookingTriggerSecs
+		currentPort := config.Port // Ambil port aktif
 		configMu.RUnlock()
+
+		newCfg.Port = currentPort // Kembalikan port agar tidak kosong
 
 		// Simpan konfigurasi baru
 		if err := saveConfig(newCfg); err != nil {
