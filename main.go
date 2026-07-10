@@ -37,6 +37,7 @@ type Config struct {
 	OpenAIAPIKey       string  `json:"openai_api_key"`
 	GeminiAPIKey       string  `json:"gemini_api_key"`
 	GeminiPrompt       string  `json:"gemini_prompt"`
+	LastTrainedCount   int     `json:"last_trained_count"`
 }
 
 var (
@@ -109,6 +110,11 @@ func loadConfig() error {
 		updated = true
 	}
 
+	if config.LastTrainedCount == 0 {
+		config.LastTrainedCount = countDatasetImages()
+		updated = true
+	}
+
 	if updated {
 		// Simpan perubahan secara diam-diam agar config.json ter-update
 		fileOut, _ := json.MarshalIndent(config, "", "  ")
@@ -129,6 +135,214 @@ func saveConfig(cfg Config) error {
 		return err
 	}
 	return os.WriteFile(configPath, file, 0644)
+}
+
+// saveConfigNoLock menyimpan konfigurasi tanpa melakukan penguncian ulang mutex (aman dipanggil dari dalam lock)
+func saveConfigNoLock() error {
+	file, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, file, 0644)
+}
+
+// countDatasetImages menghitung jumlah gambar JPG yang ada di folder latihan
+func countDatasetImages() int {
+	files, err := os.ReadDir("dataset/images/train")
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(strings.ToLower(f.Name()), ".jpg") {
+			count++
+		}
+	}
+	return count
+}
+
+// reloadLocalAIService memanggil endpoint Python FastAPI untuk memuat ulang model kustom secara otomatis
+func reloadLocalAIService() error {
+	configMu.RLock()
+	aiEndpoint := config.AIEndpoint
+	configMu.RUnlock()
+
+	// Panggil POST /reload ke layanan Python AI
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(aiEndpoint+"/reload", "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status code %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// checkAndTriggerAutoTraining memeriksa apakah dataset baru bertambah kelipatan 10 untuk memicu training otomatis
+func checkAndTriggerAutoTraining() {
+	configMu.Lock()
+	lastTrained := config.LastTrainedCount
+	configMu.Unlock()
+
+	currentCount := countDatasetImages()
+	if currentCount-lastTrained >= 10 {
+		log.Printf("[Auto-Train] Memicu training YOLO otomatis! Ditemukan %d gambar baru (Latihan terakhir: %d gambar, Saat ini: %d gambar)", currentCount-lastTrained, lastTrained, currentCount)
+		
+		// Mulai training background dengan default yolo26, 30 epochs di CPU
+		err := startModelTrainingBackground("yolo26", 30, "cpu")
+		if err == nil {
+			// Perbarui catatan training terakhir
+			configMu.Lock()
+			config.LastTrainedCount = currentCount
+			saveConfigNoLock()
+			configMu.Unlock()
+			log.Printf("[Auto-Train] Konfigurasi last_trained_count diperbarui menjadi %d", currentCount)
+		} else {
+			log.Printf("[Auto-Train] Gagal memicu training otomatis: %v (mungkin latihan lain sedang berjalan)", err)
+		}
+	}
+}
+
+// startModelTrainingBackground mengeksekusi pelatihan YOLO di latar belakang
+func startModelTrainingBackground(modelType string, epochs int, device string) error {
+	trainingMu.Lock()
+	if trainingActive {
+		trainingMu.Unlock()
+		return fmt.Errorf("pelatihan sedang berjalan")
+	}
+	trainingActive = true
+	trainingPercent = 0
+	trainingMu.Unlock()
+
+	os.Remove("snapshots/training.log")
+	os.WriteFile("snapshots/training.log", []byte("Memulai inisialisasi pelatihan otomatis...\n"), 0644)
+
+	baseModel := "yolo26n.pt"
+	if modelType == "yolov8" {
+		baseModel = "yolov8n.pt"
+	}
+	
+	pyDevice := "cpu"
+	if device == "gpu" {
+		pyDevice = "0"
+	}
+
+	pyScript := fmt.Sprintf(`import sys
+from ultralytics import YOLO
+
+print("Memuat base model %s...")
+model = YOLO("%s")
+
+print("Mulai proses pelatihan...")
+model.train(
+    data="./dataset/data.yaml",
+    epochs=%d,
+    imgsz=640,
+    device="%s",
+    verbose=True
+)
+print("TRAINING_COMPLETED_SUCCESSFULLY")
+`, baseModel, baseModel, epochs, pyDevice)
+
+	err := os.WriteFile("train_temp.py", []byte(pyScript), 0644)
+	if err != nil {
+		trainingMu.Lock()
+		trainingActive = false
+		trainingMu.Unlock()
+		return fmt.Errorf("gagal membuat script pelatihan: %v", err)
+	}
+
+	go func() {
+		defer func() {
+			trainingMu.Lock()
+			trainingActive = false
+			trainingMu.Unlock()
+			os.Remove("train_temp.py")
+		}()
+
+		cmd := exec.Command("py", "train_temp.py")
+		
+		trainingMu.Lock()
+		trainingCmd = cmd
+		trainingMu.Unlock()
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			appendTrainingLog("Gagal membuka stdout pipe proses: " + err.Error())
+			return
+		}
+		cmd.Stderr = cmd.Stdout
+
+		if err := cmd.Start(); err != nil {
+			appendTrainingLog("Gagal memulai proses pelatihan: " + err.Error())
+			return
+		}
+
+		appendTrainingLog("Proses Python berjalan (PID " + fmt.Sprintf("%d", cmd.Process.Pid) + ")...")
+
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			appendTrainingLog(line)
+
+			if strings.Contains(line, "/") {
+				parts := strings.Fields(line)
+				for _, part := range parts {
+					if strings.Contains(part, "/") {
+						subParts := strings.Split(part, "/")
+						if len(subParts) == 2 {
+							curEpoch, err1 := strconv.Atoi(subParts[0])
+							totEpoch, err2 := strconv.Atoi(subParts[1])
+							if err1 == nil && err2 == nil && totEpoch > 0 {
+								percent := (curEpoch * 100) / totEpoch
+								trainingMu.Lock()
+								trainingPercent = percent
+								trainingMu.Unlock()
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if err := cmd.Wait(); err != nil {
+			appendTrainingLog("Pelatihan selesai dengan status error / dihentikan: " + err.Error())
+			return
+		}
+
+		appendTrainingLog("Pelatihan Selesai 100%! Menyalin hasil model terbaik...")
+		
+		bestPtPath, errFind := findLatestBestPt()
+		if errFind != nil {
+			appendTrainingLog("Gagal menemukan file best.pt hasil latihan: " + errFind.Error())
+			return
+		}
+
+		errCopy := moveFile(bestPtPath, "custom_model.pt")
+		if errCopy != nil {
+			appendTrainingLog("Gagal menyalin custom_model.pt: " + errCopy.Error())
+			return
+		}
+
+		appendTrainingLog("Model kustom berhasil diaktifkan! Mengirim perintah reload ke AI Service...")
+		
+		// Muat ulang model otomatis di backend Python
+		errReload := reloadLocalAIService()
+		if errReload != nil {
+			appendTrainingLog("Gagal reload otomatis layanan Python AI: " + errReload.Error() + ". Silakan restart manual jika perlu.")
+		} else {
+			appendTrainingLog("Model kustom berhasil dimuat ulang secara otomatis di server AI lokal!")
+		}
+
+		trainingMu.Lock()
+		trainingPercent = 100
+		trainingMu.Unlock()
+	}()
+
+	return nil
 }
 
 func main() {
@@ -834,7 +1048,7 @@ func handleAPITrainStart(w http.ResponseWriter, r *http.Request) {
 
 	// Verifikasi apakah dataset/data.yaml ada
 	if _, err := os.Stat("dataset/data.yaml"); os.IsNotExist(err) {
-		w.WriteHeader(http.StatusOK) // Kembalikan HTTP 200 dengan status error agar ditampilkan di browser
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "error",
 			"message": "Gagal memulai pelatihan: Anda belum melabeli gambar apa pun! Silakan buka tab 'AI Labeling Center' dan beri label minimal 1 gambar terlebih dahulu.",
@@ -853,127 +1067,23 @@ func handleAPITrainStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	os.Remove("snapshots/training.log")
-	os.WriteFile("snapshots/training.log", []byte("Memulai inisialisasi pelatihan...\n"), 0644)
-
-	baseModel := "yolo26n.pt"
-	if req.ModelType == "yolov8" {
-		baseModel = "yolov8n.pt"
-	}
-	
-	pyDevice := "cpu"
-	if req.Device == "gpu" {
-		pyDevice = "0"
-	}
-
-	pyScript := fmt.Sprintf(`import sys
-from ultralytics import YOLO
-
-print("Memuat base model %s...")
-model = YOLO("%s")
-
-print("Mulai proses pelatihan...")
-model.train(
-    data="./dataset/data.yaml",
-    epochs=%d,
-    imgsz=640,
-    device="%s",
-    verbose=True
-)
-print("TRAINING_COMPLETED_SUCCESSFULLY")
-`, baseModel, baseModel, req.Epochs, pyDevice)
-
-	err = os.WriteFile("train_temp.py", []byte(pyScript), 0644)
-	if err != nil {
+	errStart := startModelTrainingBackground(req.ModelType, req.Epochs, req.Device)
+	if errStart != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Gagal membuat script pelatihan"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": errStart.Error()})
 		return
 	}
 
-	trainingMu.Lock()
-	trainingActive = true
-	trainingPercent = 0
-	trainingMu.Unlock()
+	// Perbarui catatan training terakhir
+	configMu.Lock()
+	config.LastTrainedCount = countDatasetImages()
+	saveConfigNoLock()
+	configMu.Unlock()
 
-	go func() {
-		defer func() {
-			trainingMu.Lock()
-			trainingActive = false
-			trainingMu.Unlock()
-			os.Remove("train_temp.py")
-		}()
-
-		cmd := exec.Command("py", "train_temp.py")
-		
-		trainingMu.Lock()
-		trainingCmd = cmd
-		trainingMu.Unlock()
-
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			appendTrainingLog("Gagal membuka stdout pipe proses: " + err.Error())
-			return
-		}
-		cmd.Stderr = cmd.Stdout
-
-		if err := cmd.Start(); err != nil {
-			appendTrainingLog("Gagal memulai proses pelatihan: " + err.Error())
-			return
-		}
-
-		appendTrainingLog("Proses Python berjalan (PID " + fmt.Sprintf("%d", cmd.Process.Pid) + ")...")
-
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			appendTrainingLog(line)
-
-			if strings.Contains(line, "/") {
-				parts := strings.Fields(line)
-				for _, part := range parts {
-					if strings.Contains(part, "/") {
-						subParts := strings.Split(part, "/")
-						if len(subParts) == 2 {
-							curEpoch, err1 := strconv.Atoi(subParts[0])
-							totEpoch, err2 := strconv.Atoi(subParts[1])
-							if err1 == nil && err2 == nil && totEpoch > 0 {
-								percent := (curEpoch * 100) / totEpoch
-								trainingMu.Lock()
-								trainingPercent = percent
-								trainingMu.Unlock()
-							}
-						}
-					}
-				}
-			}
-		}
-
-		if err := cmd.Wait(); err != nil {
-			appendTrainingLog("Pelatihan selesai dengan status error / dihentikan: " + err.Error())
-			return
-		}
-
-		appendTrainingLog("Pelatihan Selesai 100%! Menyalin hasil model terbaik...")
-		
-		bestPtPath, errFind := findLatestBestPt()
-		if errFind != nil {
-			appendTrainingLog("Gagal menemukan file best.pt hasil latihan: " + errFind.Error())
-			return
-		}
-
-		errCopy := moveFile(bestPtPath, "custom_model.pt")
-		if errCopy != nil {
-			appendTrainingLog("Gagal menyalin custom_model.pt: " + errCopy.Error())
-			return
-		}
-
-		appendTrainingLog("Model kustom berhasil diaktifkan! Silakan restart layanan Python AI.")
-		trainingMu.Lock()
-		trainingPercent = 100
-		trainingMu.Unlock()
-	}()
-
-	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Pelatihan dimulai"})
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Pelatihan dimulai",
+	})
 }
 
 func handleAPITrainStatus(w http.ResponseWriter, r *http.Request) {

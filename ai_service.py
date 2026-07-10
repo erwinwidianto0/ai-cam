@@ -37,6 +37,21 @@ except Exception as e:
 def health():
     return {"status": "ok", "person_model": "yolov8n.pt", "fire_model": "fire-smoke-yolov8n"}
 
+@app.post("/reload")
+def reload_model():
+    global model_custom
+    try:
+        if os.path.exists("custom_model.pt"):
+            print("Reloading custom model...")
+            model_custom = YOLO("custom_model.pt")
+            print("Custom model reloaded successfully.")
+            return {"status": "ok", "message": "Custom model reloaded successfully."}
+        else:
+            return {"status": "error", "message": "custom_model.pt not found."}
+    except Exception as e:
+        print(f"Error reloading model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/detect")
 async def detect(file: bytes = File(...)):
     try:
