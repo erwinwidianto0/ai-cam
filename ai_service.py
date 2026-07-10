@@ -13,7 +13,9 @@ from huggingface_hub import hf_hub_download
 # Memuat model (yolo26n.pt (YOLO26) untuk manusia, rabahdev/fire-smoke-yolov8n untuk api/asap)
 try:
     print("Loading YOLO26 person model...")
-    model_person = YOLO("yolo26n.pt")
+    model_path = "custom_model.pt" if os.path.exists("custom_model.pt") else "yolo26n.pt"
+    print(f"Using person model path: {model_path}")
+    model_person = YOLO(model_path)
     print("YOLO26 person model loaded successfully.")
     
     print("Downloading/Loading YOLOv8 fire/smoke model from Hugging Face...")

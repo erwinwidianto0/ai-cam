@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +39,12 @@ var (
 	dbManager       *DBManager
 	streamProcessor *StreamProcessor
 	processorMu     sync.Mutex
+
+	// Variabel global untuk memantau status pelatihan AI lokal
+	trainingActive  bool
+	trainingPercent int
+	trainingCmd     *exec.Cmd
+	trainingMu      sync.Mutex
 )
 
 // loadConfig membaca file konfigurasi atau membuat konfigurasi default
@@ -120,8 +130,11 @@ func main() {
 	}
 	log.Printf("Konfigurasi dimuat. Menjalankan di port %s", config.Port)
 
-	// Buat folder snapshots
+	// Buat folder snapshots dan dataset lokal
 	os.MkdirAll("snapshots", 0755)
+	os.MkdirAll("dataset/raw", 0755)
+	os.MkdirAll("dataset/images/train", 0755)
+	os.MkdirAll("dataset/labels/train", 0755)
 
 	// 2. Inisialisasi Database SQLite
 	var err error
@@ -165,8 +178,16 @@ func main() {
 	http.HandleFunc("/api/settings", handleAPISettings)
 	http.HandleFunc("/api/settings/test-gemini", handleAPITestGemini)
 
-	// Endpoint menyajikan file gambar snapshot
+	// API Pelabelan dan Pelatihan Lokal
+	http.HandleFunc("/api/label/images", handleAPILabelImages)
+	http.HandleFunc("/api/label/save", handleAPILabelSave)
+	http.HandleFunc("/api/train/start", handleAPITrainStart)
+	http.HandleFunc("/api/train/status", handleAPITrainStatus)
+	http.HandleFunc("/api/train/stop", handleAPITrainStop)
+
+	// Endpoint menyajikan file gambar snapshot dan dataset
 	http.Handle("/snapshots/", http.StripPrefix("/snapshots/", http.FileServer(http.Dir("./snapshots"))))
+	http.Handle("/dataset/", http.StripPrefix("/dataset/", http.FileServer(http.Dir("./dataset"))))
 
 	// Jalankan server
 	addr := ":" + config.Port
@@ -467,10 +488,440 @@ func handleAPITestGemini(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	// Jika status 200 OK, berarti kunci API valid!
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Koneksi sukses! API Key Valid.",
 	})
+}
+
+// ==========================================
+// LOGIKA PELABELAN & PELATIHAN ASINKRON LOKAL
+// ==========================================
+
+func moveFile(src, dst string) error {
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+	// Fallback ke copy dan delete
+	input, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(dst, input, 0644)
+	if err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+func getOrAddClassID(label string) (int, error) {
+	classesPath := "dataset/classes.txt"
+	content, err := os.ReadFile(classesPath)
+	var classes []string
+	if err == nil {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				classes = append(classes, line)
+			}
+		}
+	}
+
+	// Cari indeks
+	for idx, c := range classes {
+		if strings.ToLower(c) == strings.ToLower(label) {
+			return idx, nil
+		}
+	}
+
+	// Tambahkan baru
+	classes = append(classes, label)
+	err = os.WriteFile(classesPath, []byte(strings.Join(classes, "\n")+"\n"), 0644)
+	if err != nil {
+		return 0, err
+	}
+
+	// Tulis ulang data.yaml
+	err = rebuildDataYAML(classes)
+	if err != nil {
+		return 0, err
+	}
+
+	return len(classes) - 1, nil
+}
+
+func rebuildDataYAML(classes []string) error {
+	yamlPath := "dataset/data.yaml"
+	var formattedNames []string
+	for _, c := range classes {
+		formattedNames = append(formattedNames, fmt.Sprintf("'%s'", c))
+	}
+	yamlContent := fmt.Sprintf(`train: ./dataset/images/train
+val: ./dataset/images/train
+nc: %d
+names: [%s]
+`, len(classes), strings.Join(formattedNames, ", "))
+	return os.WriteFile(yamlPath, []byte(yamlContent), 0644)
+}
+
+func findLatestBestPt() (string, error) {
+	defaultPath := filepath.Join("runs", "detect", "train", "weights", "best.pt")
+	if _, err := os.Stat(defaultPath); err == nil {
+		return defaultPath, nil
+	}
+
+	detectDir := filepath.Join("runs", "detect")
+	files, err := os.ReadDir(detectDir)
+	if err != nil {
+		return "", err
+	}
+
+	var latestDir string
+	var latestTime time.Time
+
+	for _, file := range files {
+		if file.IsDir() && strings.HasPrefix(file.Name(), "train") {
+			dirPath := filepath.Join(detectDir, file.Name())
+			info, err := os.Stat(dirPath)
+			if err == nil {
+				if latestDir == "" || info.ModTime().After(latestTime) {
+					latestDir = dirPath
+					latestTime = info.ModTime()
+				}
+			}
+		}
+	}
+
+	if latestDir == "" {
+		return "", fmt.Errorf("tidak menemukan folder runs/detect/train*")
+	}
+
+	bestPt := filepath.Join(latestDir, "weights", "best.pt")
+	if _, err := os.Stat(bestPt); err != nil {
+		return "", fmt.Errorf("tidak menemukan file best.pt di %s", bestPt)
+	}
+
+	return bestPt, nil
+}
+
+func appendTrainingLog(line string) {
+	logFile, err := os.OpenFile("snapshots/training.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer logFile.Close()
+		logFile.WriteString(line + "\n")
+	}
+}
+
+func handleAPILabelImages(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	files, err := os.ReadDir("dataset/raw")
+	if err != nil {
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+
+	var images []string
+	for _, file := range files {
+		if !file.IsDir() {
+			name := file.Name()
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
+				images = append(images, name)
+			}
+		}
+	}
+	json.NewEncoder(w).Encode(images)
+}
+
+type LabelBox struct {
+	Label string  `json:"label"`
+	XMin  float64 `json:"x_min"`
+	YMin  float64 `json:"y_min"`
+	XMax  float64 `json:"x_max"`
+	YMax  float64 `json:"y_max"`
+}
+
+type LabelSaveRequest struct {
+	Filename string     `json:"filename"`
+	Boxes    []LabelBox `json:"boxes"`
+}
+
+func handleAPILabelSave(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LabelSaveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Invalid JSON"})
+		return
+	}
+
+	if req.Filename == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Filename is required"})
+		return
+	}
+
+	ext := filepath.Ext(req.Filename)
+	nameWithoutExt := strings.TrimSuffix(req.Filename, ext)
+	txtPath := filepath.Join("dataset", "labels", "train", nameWithoutExt+".txt")
+
+	var txtLines []string
+	for _, box := range req.Boxes {
+		labelTrimmed := strings.TrimSpace(box.Label)
+		if labelTrimmed == "" {
+			continue
+		}
+
+		classID, err := getOrAddClassID(labelTrimmed)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal memetakan kelas: %v", err)})
+			return
+		}
+
+		xCenter := (box.XMin + box.XMax) / 2
+		yCenter := (box.YMin + box.YMax) / 2
+		width := box.XMax - box.XMin
+		height := box.YMax - box.YMin
+
+		if xCenter < 0 { xCenter = 0 } else if xCenter > 1 { xCenter = 1 }
+		if yCenter < 0 { yCenter = 0 } else if yCenter > 1 { yCenter = 1 }
+		if width < 0 { width = 0 } else if width > 1 { width = 1 }
+		if height < 0 { height = 0 } else if height > 1 { height = 1 }
+
+		line := fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classID, xCenter, yCenter, width, height)
+		txtLines = append(txtLines, line)
+	}
+
+	txtContent := strings.Join(txtLines, "\n") + "\n"
+	err := os.WriteFile(txtPath, []byte(txtContent), 0644)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal menyimpan file label: %v", err)})
+		return
+	}
+
+	srcImgPath := filepath.Join("dataset", "raw", req.Filename)
+	dstImgPath := filepath.Join("dataset", "images", "train", req.Filename)
+	err = moveFile(srcImgPath, dstImgPath)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal memindahkan file gambar: %v", err)})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Berhasil menyimpan label"})
+}
+
+type TrainStartRequest struct {
+	Epochs    int    `json:"epochs"`
+	ModelType string `json:"model_type"`
+	Device    string `json:"device"`
+}
+
+func handleAPITrainStart(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	trainingMu.Lock()
+	if trainingActive {
+		trainingMu.Unlock()
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Pelatihan AI sedang berjalan"})
+		return
+	}
+	trainingMu.Unlock()
+
+	var req TrainStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Invalid JSON"})
+		return
+	}
+
+	if req.Epochs <= 0 {
+		req.Epochs = 30
+	}
+	if req.ModelType != "yolo26" && req.ModelType != "yolov8" {
+		req.ModelType = "yolo26"
+	}
+	if req.Device != "cpu" && req.Device != "gpu" {
+		req.Device = "cpu"
+	}
+
+	os.Remove("snapshots/training.log")
+	os.WriteFile("snapshots/training.log", []byte("Memulai inisialisasi pelatihan...\n"), 0644)
+
+	baseModel := "yolo26n.pt"
+	if req.ModelType == "yolov8" {
+		baseModel = "yolov8n.pt"
+	}
+	
+	pyDevice := "cpu"
+	if req.Device == "gpu" {
+		pyDevice = "0"
+	}
+
+	pyScript := fmt.Sprintf(`import sys
+from ultralytics import YOLO
+
+print("Memuat base model %s...")
+model = YOLO("%s")
+
+print("Mulai proses pelatihan...")
+model.train(
+    data="./dataset/data.yaml",
+    epochs=%d,
+    imgsz=640,
+    device="%s",
+    verbose=True
+)
+print("TRAINING_COMPLETED_SUCCESSFULLY")
+`, baseModel, baseModel, req.Epochs, pyDevice)
+
+	err := os.WriteFile("train_temp.py", []byte(pyScript), 0644)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Gagal membuat script pelatihan"})
+		return
+	}
+
+	trainingMu.Lock()
+	trainingActive = true
+	trainingPercent = 0
+	trainingMu.Unlock()
+
+	go func() {
+		defer func() {
+			trainingMu.Lock()
+			trainingActive = false
+			trainingMu.Unlock()
+			os.Remove("train_temp.py")
+		}()
+
+		cmd := exec.Command("py", "train_temp.py")
+		
+		trainingMu.Lock()
+		trainingCmd = cmd
+		trainingMu.Unlock()
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			appendTrainingLog("Gagal membuka stdout pipe proses: " + err.Error())
+			return
+		}
+		cmd.Stderr = cmd.Stdout
+
+		if err := cmd.Start(); err != nil {
+			appendTrainingLog("Gagal memulai proses pelatihan: " + err.Error())
+			return
+		}
+
+		appendTrainingLog("Proses Python berjalan (PID " + fmt.Sprintf("%d", cmd.Process.Pid) + ")...")
+
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			appendTrainingLog(line)
+
+			if strings.Contains(line, "/") {
+				parts := strings.Fields(line)
+				for _, part := range parts {
+					if strings.Contains(part, "/") {
+						subParts := strings.Split(part, "/")
+						if len(subParts) == 2 {
+							curEpoch, err1 := strconv.Atoi(subParts[0])
+							totEpoch, err2 := strconv.Atoi(subParts[1])
+							if err1 == nil && err2 == nil && totEpoch > 0 {
+								percent := (curEpoch * 100) / totEpoch
+								trainingMu.Lock()
+								trainingPercent = percent
+								trainingMu.Unlock()
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if err := cmd.Wait(); err != nil {
+			appendTrainingLog("Pelatihan selesai dengan status error / dihentikan: " + err.Error())
+			return
+		}
+
+		appendTrainingLog("Pelatihan Selesai 100%! Menyalin hasil model terbaik...")
+		
+		bestPtPath, errFind := findLatestBestPt()
+		if errFind != nil {
+			appendTrainingLog("Gagal menemukan file best.pt hasil latihan: " + errFind.Error())
+			return
+		}
+
+		errCopy := moveFile(bestPtPath, "custom_model.pt")
+		if errCopy != nil {
+			appendTrainingLog("Gagal menyalin custom_model.pt: " + errCopy.Error())
+			return
+		}
+
+		appendTrainingLog("Model kustom berhasil diaktifkan! Silakan restart layanan Python AI.")
+		trainingMu.Lock()
+		trainingPercent = 100
+		trainingMu.Unlock()
+	}()
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Pelatihan dimulai"})
+}
+
+func handleAPITrainStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	trainingMu.Lock()
+	active := trainingActive
+	percent := trainingPercent
+	trainingMu.Unlock()
+
+	logBytes, err := os.ReadFile("snapshots/training.log")
+	logText := ""
+	if err == nil {
+		logText = string(logBytes)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"is_training":      active,
+		"progress_percent": percent,
+		"logs":             logText,
+	})
+}
+
+func handleAPITrainStop(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	trainingMu.Lock()
+	defer trainingMu.Unlock()
+
+	if !trainingActive || trainingCmd == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Tidak ada pelatihan yang berjalan"})
+		return
+	}
+
+	err := trainingCmd.Process.Kill()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Gagal menghentikan proses: " + err.Error()})
+		return
+	}
+
+	trainingActive = false
+	appendTrainingLog("\n=== PELATIHAN DIHENTIKAN OLEH PENGGUNA ===")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Pelatihan berhasil dihentikan"})
 }

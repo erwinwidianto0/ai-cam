@@ -951,5 +951,337 @@ input[type="range"]::-webkit-slider-thumb:hover {
     }
 }
 
+/* Navigation Tabs */
+.app-nav {
+    display: flex;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 6px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.nav-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+.nav-tab:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-tab.active {
+    color: var(--text-primary);
+    background: var(--accent-gradient);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+/* Tab Containers */
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* General Layout for Labeling & Training */
+.tab-layout {
+    display: grid;
+    grid-template-columns: 1.8fr 1.2fr;
+    gap: 24px;
+    margin-top: 24px;
+}
+
+@media (max-width: 1024px) {
+    .tab-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel-left {
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-right {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Local Labeling Center Canvas */
+.labeling-canvas-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#labeling-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.labeling-draw-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    z-index: 10;
+}
+
+.canvas-actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 16px;
+    gap: 12px;
+}
+
+.canvas-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.canvas-empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    color: var(--text-muted);
+}
+
+.canvas-empty-state h3 {
+    font-family: var(--font-heading);
+    font-size: 20px;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.canvas-empty-state p {
+    font-size: 14px;
+    max-width: 400px;
+    line-height: 1.5;
+}
+
+/* Bounding box rect overlays on canvas */
+.drawn-box-rect {
+    position: absolute;
+    border: 2px solid #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+/* Label boxes list in right panel */
+.boxes-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.label-box-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.label-box-item:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.box-number {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-secondary);
+    min-width: 24px;
+}
+
+.box-label-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: var(--font-body);
+    transition: border-color 0.2s ease;
+}
+
+.box-label-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.btn-delete-box {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.btn-delete-box:hover {
+    color: var(--color-red);
+}
+
+/* Local Training Center styling */
+.training-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.training-form .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.training-form .form-select,
+.training-form .form-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: var(--font-body);
+}
+
+.training-form .form-select:focus,
+.training-form .form-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.training-form .input-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.btn-block {
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.training-action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+/* Training status and console terminal styling */
+.training-status-area {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.progress-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: var(--accent-gradient);
+    border-radius: 6px;
+    width: 0%;
+    transition: width 0.4s ease;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+}
+
+.console-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.btn-clear-text {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.btn-clear-text:hover {
+    color: var(--accent-primary);
+}
+
+.console-log-terminal {
+    background: #020617;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    color: #10b981;
+    line-height: 1.6;
+    height: 320px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    box-shadow: inset 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
 
 
