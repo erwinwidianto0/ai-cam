@@ -58,6 +58,10 @@
                 </div>
                 <div class="video-container">
                     <img id="live-video" src="/stream" alt="Live CCTV Feed" onerror="handleVideoError()">
+                    <!-- ROI Preview Overlay (hanya muncul saat modal pengaturan dibuka) -->
+                    <div id="roi-overlay" class="roi-overlay-visual">
+                        <span class="roi-label-visual">Area Deteksi Kompor (ROI)</span>
+                    </div>
                     <div class="video-overlay-offline" id="video-offline-msg">
                         <div class="offline-icon">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
@@ -142,26 +146,26 @@
                 </div>
                 
                 <h3 class="settings-subtitle">Batas Koordinat Zona Memasak (ROI)</h3>
-                <p class="settings-desc">Masukkan nilai antara 0.00 (Kiri/Atas) hingga 1.00 (Kanan/Bawah) untuk menentukan kotak deteksi kompor dapur.</p>
+                <p class="settings-desc">Geser slider di bawah ini. Anda akan melihat area terpilih terlukis secara real-time pada tampilan video live di belakang modal ini.</p>
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="zone-x-min">X Min (Batas Kiri)</label>
-                        <input type="number" id="zone-x-min" name="zone_x_min" required step="0.05" min="0" max="1.0">
+                        <label for="zone-x-min">X Min (Kiri: <span id="val-x-min" class="val-badge">0.30</span>)</label>
+                        <input type="range" id="zone-x-min" name="zone_x_min" min="0" max="1" step="0.01" value="0.30">
                     </div>
                     <div class="form-group">
-                        <label for="zone-y-min">Y Min (Batas Atas)</label>
-                        <input type="number" id="zone-y-min" name="zone_y_min" required step="0.05" min="0" max="1.0">
+                        <label for="zone-y-min">Y Min (Atas: <span id="val-y-min" class="val-badge">0.20</span>)</label>
+                        <input type="range" id="zone-y-min" name="zone_y_min" min="0" max="1" step="0.01" value="0.20">
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="zone-x-max">X Max (Batas Kanan)</label>
-                        <input type="number" id="zone-x-max" name="zone_x_max" required step="0.05" min="0" max="1.0">
+                        <label for="zone-x-max">X Max (Kanan: <span id="val-x-max" class="val-badge">0.70</span>)</label>
+                        <input type="range" id="zone-x-max" name="zone_x_max" min="0" max="1" step="0.01" value="0.70">
                     </div>
                     <div class="form-group">
-                        <label for="zone-y-max">Y Max (Batas Bawah)</label>
-                        <input type="number" id="zone-y-max" name="zone_y_max" required step="0.05" min="0" max="1.0">
+                        <label for="zone-y-max">Y Max (Bawah: <span id="val-y-max" class="val-badge">0.90</span>)</label>
+                        <input type="range" id="zone-y-max" name="zone_y_max" min="0" max="1" step="0.01" value="0.90">
                     </div>
                 </div>
                 <div class="form-group">
@@ -219,15 +223,56 @@
         const viewerTime = document.getElementById('viewer-time');
         const viewerConfidence = document.getElementById('viewer-confidence');
 
+        // Overlay ROI dinamis
+        const roiOverlay = document.getElementById('roi-overlay');
+        const sliders = ['zone-x-min', 'zone-y-min', 'zone-x-max', 'zone-y-max'];
+
         let isVideoOnline = true;
 
-        // Buka / Tutup Modal Pengaturan
-        btnSettings.addEventListener('click', () => {
-            fetchSettings();
+        // Mengupdate tampilan kotak overlay pratinjau (ROI) di video
+        function updateROIOverlay() {
+            const xMin = parseFloat(document.getElementById('zone-x-min').value) || 0;
+            const yMin = parseFloat(document.getElementById('zone-y-min').value) || 0;
+            const xMax = parseFloat(document.getElementById('zone-x-max').value) || 0;
+            const yMax = parseFloat(document.getElementById('zone-y-max').value) || 0;
+
+            // Update Label Teks Nilai Slider
+            document.getElementById('val-x-min').textContent = xMin.toFixed(2);
+            document.getElementById('val-y-min').textContent = yMin.toFixed(2);
+            document.getElementById('val-x-max').textContent = xMax.toFixed(2);
+            document.getElementById('val-y-max').textContent = yMax.toFixed(2);
+
+            // Hitung lebar & tinggi relatif (%)
+            const left = xMin * 100;
+            const top = yMin * 100;
+            const width = Math.max(0, xMax - xMin) * 100;
+            const height = Math.max(0, yMax - yMin) * 100;
+
+            // Atur gaya posisi kotak overlay
+            roiOverlay.style.left = `${left}%`;
+            roiOverlay.style.top = `${top}%`;
+            roiOverlay.style.width = `${width}%`;
+            roiOverlay.style.height = `${height}%`;
+        }
+
+        // Jalankan update overlay setiap kali slider digeser
+        sliders.forEach(id => {
+            document.getElementById(id).addEventListener('input', updateROIOverlay);
+        });
+
+        // Buka Modal Pengaturan & Tampilkan Overlay ROI
+        btnSettings.addEventListener('click', async () => {
+            await fetchSettings();
+            roiOverlay.style.display = 'block';
+            updateROIOverlay();
             modalSettings.classList.add('active');
         });
 
-        const hideSettings = () => modalSettings.classList.remove('active');
+        // Penutupan Modal Pengaturan
+        const hideSettings = () => {
+            modalSettings.classList.remove('active');
+            roiOverlay.style.display = 'none';
+        };
         btnCloseSettings.addEventListener('click', hideSettings);
         btnCancelSettings.addEventListener('click', hideSettings);
 
@@ -279,6 +324,9 @@
                 document.getElementById('zone-x-max').value = data.zone_x_max;
                 document.getElementById('zone-y-max').value = data.zone_y_max;
                 document.getElementById('cooking-trigger-secs').value = data.cooking_trigger_secs;
+
+                // Update overlay pratinjau
+                updateROIOverlay();
             } catch (err) {
                 console.error("Gagal mengambil konfigurasi: ", err);
             }
@@ -424,7 +472,7 @@
         // Polling Data Dashboard
         fetchStats();
         fetchLog();
-        setInterval(fetchStats, 1000); // Polling stats lebih cepat (1s) agar responsif
+        setInterval(fetchStats, 1000);
         setInterval(fetchLog, 3000);
     </script>
 </body>
