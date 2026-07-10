@@ -137,6 +137,22 @@ func main() {
 	os.MkdirAll("dataset/images/train", 0755)
 	os.MkdirAll("dataset/labels/train", 0755)
 
+	// Perbaiki otomatis format data.yaml jika classes.txt sudah ada
+	classesPath := "dataset/classes.txt"
+	if content, err := os.ReadFile(classesPath); err == nil {
+		var classes []string
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				classes = append(classes, line)
+			}
+		}
+		if len(classes) > 0 {
+			rebuildDataYAML(classes)
+		}
+	}
+
 	// 2. Inisialisasi Database SQLite
 	var err error
 	dbManager, err = NewDBManager("aicam.db")
@@ -561,8 +577,9 @@ func rebuildDataYAML(classes []string) error {
 	for _, c := range classes {
 		formattedNames = append(formattedNames, fmt.Sprintf("'%s'", c))
 	}
-	yamlContent := fmt.Sprintf(`train: ./dataset/images/train
-val: ./dataset/images/train
+	yamlContent := fmt.Sprintf(`path: ./dataset
+train: images/train
+val: images/train
 nc: %d
 names: [%s]
 `, len(classes), strings.Join(formattedNames, ", "))
