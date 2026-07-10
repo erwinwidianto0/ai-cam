@@ -1196,12 +1196,66 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 
 // sanitizeJSON membersihkan format JSON mentah dari blok tag markdown kustom (seperti ```json ... ```)
 func sanitizeJSON(input string) string {
-	start := strings.Index(input, "{")
-	end := strings.LastIndex(input, "}")
-	if start == -1 || end == -1 || start >= end {
+	startIdx := -1
+	endIdx := -1
+	
+	// Cari karakter kurung buka pertama ({ atau [)
+	for i, r := range input {
+		if r == '{' || r == '[' {
+			startIdx = i
+			break
+		}
+	}
+	
+	// Cari karakter kurung tutup terakhir (} atau ])
+	for i := len(input) - 1; i >= 0; i-- {
+		if input[i] == '}' || input[i] == ']' {
+			endIdx = i
+			break
+		}
+	}
+	
+	if startIdx == -1 || endIdx == -1 || startIdx >= endIdx {
 		return input
 	}
-	return input[start : end+1]
+	return input[startIdx : endIdx+1]
+}
+
+// parseDetectionsJSON menguraikan teks JSON deteksi (baik berwujud array langsung maupun terbungkus objek)
+// menjadi slice []GeminiAutoLabelResult secara toleran dan fleksibel.
+func parseDetectionsJSON(cleanJSON string) ([]GeminiAutoLabelResult, error) {
+	cleanJSON = strings.TrimSpace(cleanJSON)
+	if cleanJSON == "" {
+		return nil, fmt.Errorf("empty JSON string")
+	}
+
+	// 1. Coba unmarshal langsung sebagai array []GeminiAutoLabelResult
+	var list []GeminiAutoLabelResult
+	if err := json.Unmarshal([]byte(cleanJSON), &list); err == nil {
+		return list, nil
+	}
+
+	// 2. Coba unmarshal sebagai map objek, barangkali dibungkus key kustom oleh VLM
+	var objMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(cleanJSON), &objMap); err == nil {
+		// Cari key potensial yang berisi array deteksi
+		for _, key := range []string{"detections", "objects", "boxes", "results", "data", "predictions"} {
+			if raw, ok := objMap[key]; ok {
+				var subList []GeminiAutoLabelResult
+				if err := json.Unmarshal(raw, &subList); err == nil {
+					return subList, nil
+				}
+			}
+		}
+	}
+
+	// 3. Coba unmarshal sebagai objek tunggal GeminiAutoLabelResult (jika hanya ada 1 deteksi tanpa array)
+	var single GeminiAutoLabelResult
+	if err := json.Unmarshal([]byte(cleanJSON), &single); err == nil {
+		return []GeminiAutoLabelResult{single}, nil
+	}
+
+	return nil, fmt.Errorf("failed to decode JSON into detection slice (raw text: %s)", cleanJSON)
 }
 
 // saveFireSnapshot menyimpan snapshot bukti kebakaran ke disk & log ke database SQLite

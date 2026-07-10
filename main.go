@@ -1328,8 +1328,8 @@ Contoh format JSON yang diharapkan:
 	rawText := geminiResp.Candidates[0].Content.Parts[0].Text
 	cleanJSON := sanitizeJSON(rawText)
 
-	var geminiDetections []GeminiAutoLabelResult
-	if err := json.Unmarshal([]byte(cleanJSON), &geminiDetections); err != nil {
+	geminiDetections, err := parseDetectionsJSON(cleanJSON)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse detections JSON: %w", err)
 	}
 
@@ -1626,8 +1626,8 @@ Contoh format JSON yang diharapkan:
 	rawText := openAIResp.Choices[0].Message.Content
 	cleanJSON := sanitizeJSON(rawText)
 
-	var geminiDetections []GeminiAutoLabelResult
-	if err := json.Unmarshal([]byte(cleanJSON), &geminiDetections); err != nil {
+	geminiDetections, err := parseDetectionsJSON(cleanJSON)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse detections JSON: %w", err)
 	}
 
