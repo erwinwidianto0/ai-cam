@@ -66,31 +66,59 @@ async def detect(file: bytes = File(...)):
         
         detections = []
         
-        # 1. Proses deteksi objek standar (person/car/motorcycle) dari base model
+        # 1. Proses deteksi objek standar dari base model (COCO 80 kelas)
         for result in results_person:
             boxes = result.boxes
             for box in boxes:
                 cls_id = int(box.cls[0])
                 label = model_person.names[cls_id]
                 
-                # Gunakan model COCO untuk mendeteksi manusia, mobil, dan motor demi akurasi tinggi
-                if label in ["person", "car", "motorcycle"]:
-                    mapped_label = label
-                    if label == "car":
-                        mapped_label = "mobil"
-                    elif label == "motorcycle":
-                        mapped_label = "motor"
-                    elif label == "person":
-                        mapped_label = "person" # Go mengharapkan label "person"
-                        
-                    confidence = float(box.conf[0])
-                    x1, y1, x2, y2 = map(float, box.xyxy[0])
-                    detections.append({
-                        "class": cls_id,
-                        "label": mapped_label,
-                        "confidence": confidence,
-                        "box": [x1, y1, x2, y2]
-                    })
+                # Kamus terjemahan COCO ke Bahasa Indonesia untuk UI dasbor Anda
+                COCO_TRANSLATION = {
+                    "person": "person",  # Go melacak area memasak dengan kata kunci "person"
+                    "car": "mobil",
+                    "motorcycle": "motor",
+                    "bicycle": "sepeda",
+                    "backpack": "tas",
+                    "umbrella": "payung",
+                    "handbag": "tas tangan",
+                    "tie": "dasi",
+                    "suitcase": "koper",
+                    "bottle": "botol",
+                    "wine glass": "gelas",
+                    "cup": "cangkir/gelas",
+                    "fork": "garpu",
+                    "knife": "pisau",
+                    "spoon": "sendok",
+                    "bowl": "mangkuk",
+                    "chair": "kursi",
+                    "couch": "sofa",
+                    "potted plant": "tanaman",
+                    "bed": "kasur",
+                    "dining table": "meja",
+                    "tv": "tv",
+                    "laptop": "laptop",
+                    "mouse": "mouse",
+                    "keyboard": "keyboard",
+                    "cell phone": "hp",
+                    "microwave": "microwave",
+                    "oven": "oven",
+                    "sink": "wastafel",
+                    "refrigerator": "kulkas",
+                    "book": "buku",
+                    "clock": "jam",
+                    "scissors": "gunting"
+                }
+                
+                mapped_label = COCO_TRANSLATION.get(label, label)
+                confidence = float(box.conf[0])
+                x1, y1, x2, y2 = map(float, box.xyxy[0])
+                detections.append({
+                    "class": cls_id,
+                    "label": mapped_label,
+                    "confidence": confidence,
+                    "box": [x1, y1, x2, y2]
+                })
                     
         # 2. Jalankan inferensi model kustom jika terpasang (untuk kelas kustom unik Anda)
         if model_custom is not None:
