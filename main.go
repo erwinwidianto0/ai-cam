@@ -3,8 +3,12 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
@@ -1089,6 +1093,142 @@ func handleAPILabelImagesLabeled(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(fileList)
 }
 
+// GeminiAutoLabelResult merepresentasikan struktur data deteksi objek dari Gemini
+type GeminiAutoLabelResult struct {
+	Label      string    `json:"label"`
+	Box        []float64 `json:"box"` // [x_min, y_min, x_max, y_max] normalisasi 0.0 - 1.0
+	Confidence float64   `json:"confidence"`
+}
+
+// detectObjectsWithGemini memanggil API Gemini untuk mendeteksi objek 2D secara cerdas
+func detectObjectsWithGemini(imgBytes []byte, apiKey string) ([]AIDetection, error) {
+	// Encode gambar ke Base64
+	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
+
+	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
+Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher). 
+
+Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
+Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
+Tambahkan estimasi tingkat kepercayaan key "confidence" dari 0.0 sampai 1.0.
+Jangan sertakan teks penjelasan lain atau wrapper markdown selain JSON yang valid.
+
+Contoh format JSON yang diharapkan:
+[
+  {
+    "label": "manusia",
+    "box": [0.15, 0.20, 0.45, 0.85],
+    "confidence": 0.95
+  }
+]`
+
+	// Bentuk request payload
+	reqPayload := GeminiRequest{
+		Contents: []GeminiContent{
+			{
+				Parts: []GeminiPart{
+					{
+						Text: prompt,
+					},
+					{
+						InlineData: &GeminiInlineData{
+							MimeType: "image/jpeg",
+							Data:     base64Data,
+						},
+					},
+				},
+			},
+		},
+		GenerationConfig: &GeminiGenConfig{
+			ResponseMimeType: "application/json",
+		},
+	}
+
+	jsonBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Gemini request: %w", err)
+	}
+
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=%s", apiKey)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-goog-api-key", apiKey)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Gemini API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("Gemini API error (%d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var geminiResp GeminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("empty response candidates")
+	}
+
+	rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+	cleanJSON := sanitizeJSON(rawText)
+
+	var geminiDetections []GeminiAutoLabelResult
+	if err := json.Unmarshal([]byte(cleanJSON), &geminiDetections); err != nil {
+		return nil, fmt.Errorf("failed to parse detections JSON: %w", err)
+	}
+
+	// Dapatkan lebar dan tinggi asli gambar untuk mengonversikan koordinat persen ke koordinat piksel
+	imgReader := bytes.NewReader(imgBytes)
+	imgConfig, _, errConfig := image.DecodeConfig(imgReader)
+	if errConfig != nil {
+		return nil, fmt.Errorf("failed to read image dimensions: %w", errConfig)
+	}
+	width := float64(imgConfig.Width)
+	height := float64(imgConfig.Height)
+
+	var detections []AIDetection
+	for _, gd := range geminiDetections {
+		if len(gd.Box) < 4 {
+			continue
+		}
+		
+		// Konversikan koordinat normalisasi (0.0 - 1.0) menjadi koordinat absolut piksel gambar asli
+		x1 := gd.Box[0] * width
+		y1 := gd.Box[1] * height
+		x2 := gd.Box[2] * width
+		y2 := gd.Box[3] * height
+
+		// Standardize label
+		label := gd.Label
+		if label == "manusia" {
+			label = "person"
+		} else if label == "api" {
+			label = "fire"
+		} else if label == "asap" {
+			label = "smoke"
+		}
+
+		detections = append(detections, AIDetection{
+			Class:      0,
+			Label:      label,
+			Confidence: gd.Confidence,
+			Box:        []float64{x1, y1, x2, y2},
+		})
+	}
+
+	return detections, nil
+}
+
 // handleAPILabelAutoDetect melakukan inferensi AI pada gambar dataset mentah/terlabeli untuk autolabeling
 func handleAPILabelAutoDetect(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -1121,23 +1261,43 @@ func handleAPILabelAutoDetect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dapatkan AI Client dari streamProcessor global
-	processorMu.Lock()
-	if streamProcessor == nil || streamProcessor.aiClient == nil {
-		processorMu.Unlock()
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Layanan AI Client belum diinisialisasi"})
-		return
-	}
-	aiClient := streamProcessor.aiClient
-	processorMu.Unlock()
+	// Cek apakah Gemini API Key dikonfigurasi
+	configMu.RLock()
+	apiKey := config.GeminiAPIKey
+	configMu.RUnlock()
 
-	// Panggil deteksi AI ke python service
-	detections, err := aiClient.Detect(imgBytes)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal mendeteksi via AI: %v", err)})
-		return
+	var detections []AIDetection
+
+	if apiKey != "" {
+		// Gunakan Gemini Cloud VLM untuk hasil auto-labeling yang cerdas
+		var errGemini error
+		detections, errGemini = detectObjectsWithGemini(imgBytes, apiKey)
+		if errGemini != nil {
+			log.Printf("Gagal auto-labeling via Gemini, mencoba fallback ke model YOLO lokal: %v", errGemini)
+			// Jika gagal (timeout, dll), coba fallback ke deteksi lokal agar tetap jalan
+			apiKey = ""
+		}
+	}
+
+	if apiKey == "" {
+		// Fallback ke deteksi lokal YOLOv8
+		processorMu.Lock()
+		if streamProcessor == nil || streamProcessor.aiClient == nil {
+			processorMu.Unlock()
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Layanan AI Client lokal belum diinisialisasi"})
+			return
+		}
+		aiClient := streamProcessor.aiClient
+		processorMu.Unlock()
+
+		var errLocal error
+		detections, errLocal = aiClient.Detect(imgBytes)
+		if errLocal != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal mendeteksi via AI lokal: %v", errLocal)})
+			return
+		}
 	}
 
 	// Kembalikan daftar deteksi
