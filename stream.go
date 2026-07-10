@@ -359,7 +359,7 @@ func (sp *StreamProcessor) Start() {
 						}(jpegData)
 					}
 
-					// Salin deteksi terakhir untuk digambar pada frame ini
+					// Salin deteksi terakhir untuk analisis ROI dan VLM
 					sp.detectionsMu.Lock()
 					var detections []AIDetection
 					if sp.lastDetections != nil {
@@ -409,16 +409,111 @@ func (sp *StreamProcessor) Start() {
 						go sp.callVLMAPI(jpegData)
 					}
 
-					// Proses logika deteksi ROI dapur & penggambaran bounding box
-					processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
+					// 1. Dapatkan dimensi JPEG tanpa decode pixel (sangat cepat, 0.001ms)
+					var width, height float64 = 640, 360
+					if cfg, _, err := image.DecodeConfig(bytes.NewReader(jpegData)); err == nil {
+						width = float64(cfg.Width)
+						height = float64(cfg.Height)
+					}
 
-					// Simpan frame terbaru untuk klien baru
+					// 2. Hitung status memasak dan zona kompor secara lokal
+					personInZone, maxConf := sp.checkPersonInZone(detections, width, height)
+					localFireDetected, localSmokeDetected := false, false
+					for _, d := range detections {
+						if d.Confidence >= sp.confThreshold {
+							if d.Label == "fire" {
+								localFireDetected = true
+							} else if d.Label == "smoke" {
+								localSmokeDetected = true
+							}
+						}
+					}
+
+					// 3. Update alarm status lokal (api/asap)
+					sp.statusMu.Lock()
+					if localFireDetected || localSmokeDetected {
+						if !sp.geminiFireAlert {
+							sp.geminiFireAlert = true
+							if localFireDetected {
+								sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi indikasi API secara real-time!"
+							} else {
+								sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi indikasi ASAP secara real-time!"
+							}
+							log.Println("WARNING!!! DETEKSI BAHAYA LOKAL AKTIF!")
+							
+							// Gambar box khusus pada snapshot bukti kebakaran sebelum disimpan ke disk
+							go sp.saveFireSnapshot(jpegData, detections)
+
+							sp.geminiBusyMu.Lock()
+							gBusy := sp.geminiBusy
+							sp.geminiBusyMu.Unlock()
+							if hasAPIKey && !gBusy && time.Since(sp.geminiLastCheck) >= 10*time.Second {
+								sp.geminiLastCheck = time.Now()
+								go sp.callVLMAPI(jpegData)
+							}
+						}
+					} else {
+						if sp.geminiFireAlert {
+							sp.geminiFireAlert = false
+						}
+						if !sp.isCooking {
+							if localPersonDetected {
+								sp.geminiDescription = "Sistem lokal berjalan normal. Terdeteksi manusia, area aman dari api dan asap."
+							} else {
+								sp.geminiDescription = "Sistem lokal berjalan normal. Area aman (tidak terdeteksi manusia, api, atau asap)."
+							}
+						}
+					}
+					sp.statusMu.Unlock()
+
+					// 4. State Machine Deteksi Memasak
+					if personInZone {
+						if sp.inZoneStartTime.IsZero() {
+							sp.inZoneStartTime = now
+						}
+						sp.lastSeenInZone = now
+						
+						elapsed := now.Sub(sp.inZoneStartTime)
+						sp.secondsInZone = int(elapsed.Seconds())
+						
+						if sp.secondsInZone >= sp.cookingTriggerSecs {
+							if !sp.isCooking {
+								sp.isCooking = true
+								sp.kitchenStatus = "Memasak"
+								
+								// Gambar box pada snapshot bukti memasak sebelum disimpan ke disk
+								go sp.saveCookingSnapshot(jpegData, maxConf, detections)
+
+								sp.geminiBusyMu.Lock()
+								gBusy := sp.geminiBusy
+								sp.geminiBusyMu.Unlock()
+								if hasAPIKey && !gBusy && time.Since(sp.geminiLastCheck) >= 10*time.Second {
+									sp.geminiLastCheck = time.Now()
+									go sp.callVLMAPI(jpegData)
+								}
+							}
+						}
+					} else {
+						if !sp.inZoneStartTime.IsZero() {
+							if now.Sub(sp.lastSeenInZone) >= 3*time.Second {
+								sp.inZoneStartTime = time.Time{}
+								sp.isCooking = false
+								sp.kitchenStatus = "Kosong"
+								sp.secondsInZone = 0
+							}
+						} else {
+							sp.kitchenStatus = "Kosong"
+							sp.secondsInZone = 0
+						}
+					}
+
+					// Salin frame mentah ke currentFrame untuk klien baru
 					sp.currentFrameMu.Lock()
-					sp.currentFrame = processedJPEG
+					sp.currentFrame = jpegData
 					sp.currentFrameMu.Unlock()
 
-					// Siarkan ke seluruh klien browser yang terhubung
-					sp.broadcast(processedJPEG)
+					// Siarkan frame mentah langsung ke browser (Sangat cepat! Mengalir di 30 FPS penuh!)
+					sp.broadcast(jpegData)
 				}
 
 				if err := cmd.Wait(); err != nil {
@@ -429,6 +524,32 @@ func (sp *StreamProcessor) Start() {
 			}
 		}
 	}()
+}
+
+// checkPersonInZone menganalisis apakah ada orang di ROI berdasarkan bounding box tanpa perlu decode piksel
+func (sp *StreamProcessor) checkPersonInZone(detections []AIDetection, width, height float64) (bool, float64) {
+	personInZone := false
+	maxConf := 0.0
+	for _, det := range detections {
+		if det.Label == "person" && det.Confidence >= sp.confThreshold {
+			x1, _ := det.Box[0], det.Box[1]
+			x2, y2 := det.Box[2], det.Box[3]
+
+			px := (x1 + x2) / 2
+			py := y2
+
+			normX := px / width
+			normY := py / height
+
+			if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
+				personInZone = true
+				if det.Confidence > maxConf {
+					maxConf = det.Confidence
+				}
+			}
+		}
+	}
+	return personInZone, maxConf
 }
 
 // Stop menghentikan pemrosesan stream
@@ -892,16 +1013,8 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 
 // saveCookingSnapshot menyimpan snapshot frame yang digambar box ke disk & log ke database
 func (sp *StreamProcessor) saveCookingSnapshot(jpegData []byte, conf float64, detections []AIDetection) {
-	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
-	sp.currentFrameMu.RLock()
-	processedJPEG := make([]byte, len(sp.currentFrame))
-	copy(processedJPEG, sp.currentFrame)
-	sp.currentFrameMu.RUnlock()
-
-	// Fallback jika buffer frame belum siap
-	if len(processedJPEG) == 0 {
-		processedJPEG = jpegData
-	}
+	// Gambar box terlebih dahulu sebelum disimpan (hanya sekali, jadi tidak membebani CPU)
+	processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
 
 	// Nama file unik dengan timestamp
 	snapshotFilename := fmt.Sprintf("cooking_%s.jpg", time.Now().Format("20060102_150405_000"))
@@ -1645,16 +1758,8 @@ func parseDetectionsJSON(cleanJSON string) ([]GeminiAutoLabelResult, error) {
 
 // saveFireSnapshot menyimpan snapshot bukti kebakaran ke disk & log ke database SQLite
 func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte, detections []AIDetection) {
-	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
-	sp.currentFrameMu.RLock()
-	processedJPEG := make([]byte, len(sp.currentFrame))
-	copy(processedJPEG, sp.currentFrame)
-	sp.currentFrameMu.RUnlock()
-
-	// Fallback jika buffer frame belum siap
-	if len(processedJPEG) == 0 {
-		processedJPEG = jpegData
-	}
+	// Gambar box terlebih dahulu sebelum disimpan (hanya sekali, jadi tidak membebani CPU)
+	processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
 
 	// Nama file unik dengan timestamp
 	snapshotFilename := fmt.Sprintf("fire_%s.jpg", time.Now().Format("20060102_150405_000"))
@@ -1684,16 +1789,17 @@ func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte, detections []AIDete
 
 // saveEventSnapshot menyimpan bukti foto kejadian kustom (seperti merokok atau tidur) ke disk & log ke SQLite
 func (sp *StreamProcessor) saveEventSnapshot(jpegData []byte, eventType string) {
-	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
-	sp.currentFrameMu.RLock()
-	processedJPEG := make([]byte, len(sp.currentFrame))
-	copy(processedJPEG, sp.currentFrame)
-	sp.currentFrameMu.RUnlock()
-
-	// Fallback jika buffer frame belum siap
-	if len(processedJPEG) == 0 {
-		processedJPEG = jpegData
+	// Tarik deteksi terakhir YOLO secara aman
+	sp.detectionsMu.Lock()
+	var detections []AIDetection
+	if sp.lastDetections != nil {
+		detections = make([]AIDetection, len(sp.lastDetections))
+		copy(detections, sp.lastDetections)
 	}
+	sp.detectionsMu.Unlock()
+
+	// Gambar box terlebih dahulu sebelum disimpan (hanya sekali, jadi tidak membebani CPU)
+	processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
 
 	// Nama file unik dengan timestamp
 	snapshotFilename := fmt.Sprintf("%s_%s.jpg", eventType, time.Now().Format("20060102_150405_000"))

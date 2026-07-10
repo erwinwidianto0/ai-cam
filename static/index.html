@@ -125,8 +125,14 @@
                         <div class="stream-stats" id="stream-fps-badge">0.0 FPS</div>
                     </div>
                 </div>
-                <div class="video-container">
+                <div class="video-container" style="position: relative;">
                     <img id="live-video" src="/stream" alt="Live CCTV Feed" onerror="handleVideoError()">
+                    <!-- Layer Transparan Bounding Box Live (JavaScript) -->
+                    <div id="live-boxes-layer" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; z-index: 5;"></div>
+                    <!-- ROI Real-Time Overlay (Selalu Tampak untuk Visualisasi) -->
+                    <div id="live-roi-overlay" style="position: absolute; border: 2px solid #3b82f6; background: rgba(59, 130, 246, 0.05); display: none; pointer-events: none; box-sizing: border-box; transition: all 0.3s ease; z-index: 4;">
+                        <span id="live-roi-label" style="position: absolute; top: 0; left: 0; background: #3b82f6; color: white; font-size: 10px; padding: 2px 6px; font-weight: bold; border-bottom-right-radius: 4px; font-family: sans-serif; transition: all 0.3s ease;">ZONA KOMPOR</span>
+                    </div>
                     <!-- ROI Preview Overlay (hanya muncul saat modal pengaturan dibuka) -->
                     <div id="roi-overlay" class="roi-overlay-visual">
                         <span class="roi-label-visual">Area Deteksi Kompor (ROI)</span>
@@ -550,6 +556,12 @@
         const videoOfflineMsg = document.getElementById('video-offline-msg');
         const streamStatusDot = document.getElementById('stream-status-dot');
         const streamFpsBadge = document.getElementById('stream-fps-badge');
+
+        // Koordinat ROI Kompor Global untuk Render Sisi Client
+        let roiXMin = 0.30;
+        let roiYMin = 0.20;
+        let roiXMax = 0.70;
+        let roiYMax = 0.90;
         
         const statKitchenStatus = document.getElementById('stat-kitchen-status');
         const kitchenStatusBadge = document.getElementById('kitchen-status-badge');
@@ -735,6 +747,33 @@
             }
         }, 5000);
 
+        // Perbarui letak ROI Real-Time di atas gambar CCTV secara dinamis
+        function updateLiveROI(kitchenStatus = 'Kosong') {
+            const overlay = document.getElementById('live-roi-overlay');
+            const label = document.getElementById('live-roi-label');
+            if (!overlay) return;
+
+            overlay.style.left = `${roiXMin * 100}%`;
+            overlay.style.top = `${roiYMin * 100}%`;
+            overlay.style.width = `${(roiXMax - roiXMin) * 100}%`;
+            overlay.style.height = `${(roiYMax - roiYMin) * 100}%`;
+            overlay.style.display = 'block';
+
+            if (kitchenStatus === 'Memasak' || kitchenStatus === 'SEDANG MEMASAK') {
+                overlay.style.borderColor = '#ef4444';
+                overlay.style.background = 'rgba(239, 68, 68, 0.08)';
+                label.style.background = '#ef4444';
+            } else if (kitchenStatus.includes('ADA ORANG') || kitchenStatus.includes('KOMPOR')) {
+                overlay.style.borderColor = '#f59e0b';
+                overlay.style.background = 'rgba(245, 158, 11, 0.08)';
+                label.style.background = '#f59e0b';
+            } else {
+                overlay.style.borderColor = '#3b82f6';
+                overlay.style.background = 'rgba(59, 130, 246, 0.05)';
+                label.style.background = '#3b82f6';
+            }
+        }
+
         // Mengambil Pengaturan dari Backend
         async function fetchSettings() {
             try {
@@ -750,6 +789,13 @@
                 document.getElementById('zone-y-max').value = data.zone_y_max;
                 document.getElementById('cooking-trigger-secs').value = data.cooking_trigger_secs;
                 
+                // Simpan koordinat ROI global
+                roiXMin = data.zone_x_min;
+                roiYMin = data.zone_y_min;
+                roiXMax = data.zone_x_max;
+                roiYMax = data.zone_y_max;
+                updateLiveROI();
+
                 const vlmProvider = data.vlm_provider || "gemini";
                 document.getElementById('vlm-provider').value = vlmProvider;
                 document.getElementById('gemini-api-key').value = data.gemini_api_key || "";
@@ -794,6 +840,13 @@
                 });
                 const result = await response.json();
                 if (result.status === 'success') {
+                    // Update koordinat ROI global
+                    roiXMin = payload.zone_x_min;
+                    roiYMin = payload.zone_y_min;
+                    roiXMax = payload.zone_x_max;
+                    roiYMax = payload.zone_y_max;
+                    updateLiveROI();
+
                     hideSettings();
                     setTimeout(() => {
                         liveVideo.src = "/stream?t=" + new Date().getTime();
@@ -944,6 +997,75 @@
                 const secsInZone = data.seconds_in_zone || 0;
 
                 statKitchenStatus.textContent = status;
+
+                // Update letak & warna live ROI
+                let liveStatusText = status;
+                if (status !== 'Memasak' && secsInZone > 0) {
+                    liveStatusText = `ADA ORANG DI KOMPOR (${secsInZone}s)`;
+                }
+                updateLiveROI(liveStatusText);
+
+                // Gambar kotak objek real-time di sisi browser (JavaScript Canvas)
+                const boxesLayer = document.getElementById('live-boxes-layer');
+                if (boxesLayer) {
+                    boxesLayer.innerHTML = '';
+                    const detections = data.detections || [];
+                    const imgWidth = liveVideo.naturalWidth || 640;
+                    const imgHeight = liveVideo.naturalHeight || 360;
+
+                    detections.forEach(det => {
+                        const xMin = det.box[0] / imgWidth;
+                        const yMin = det.box[1] / imgHeight;
+                        const xMax = det.box[2] / imgWidth;
+                        const yMax = det.box[3] / imgHeight;
+
+                        const boxDiv = document.createElement('div');
+                        boxDiv.style.position = 'absolute';
+                        boxDiv.style.left = `${xMin * 100}%`;
+                        boxDiv.style.top = `${yMin * 100}%`;
+                        boxDiv.style.width = `${(xMax - xMin) * 100}%`;
+                        boxDiv.style.height = `${(yMax - yMin) * 100}%`;
+                        boxDiv.style.boxSizing = 'border-box';
+                        boxDiv.style.transition = 'all 0.1s linear';
+
+                        // Pilih warna berdasarkan jenis objek
+                        let color = '#10b981'; // hijau default untuk objek umum
+                        if (det.label === 'person') color = '#ef4444'; // merah untuk manusia
+                        else if (det.label === 'api' || det.label === 'fire') color = '#f59e0b'; // orange api
+                        else if (det.label === 'asap' || det.label === 'smoke') color = '#9ca3af'; // abu asap
+
+                        boxDiv.style.border = `2px solid ${color}`;
+                        boxDiv.style.boxShadow = `0 0 6px ${color}80`;
+
+                        // Buat label tag
+                        const labelSpan = document.createElement('span');
+                        labelSpan.style.position = 'absolute';
+                        labelSpan.style.top = '0';
+                        labelSpan.style.left = '0';
+                        labelSpan.style.background = color;
+                        labelSpan.style.color = '#fff';
+                        labelSpan.style.fontSize = '9px';
+                        labelSpan.style.padding = '1px 5px';
+                        labelSpan.style.fontWeight = 'bold';
+                        labelSpan.style.whiteSpace = 'nowrap';
+                        labelSpan.style.fontFamily = 'Inter, sans-serif';
+                        labelSpan.style.transform = 'translateY(-100%)';
+                        labelSpan.style.borderRadius = '3px 3px 0 0';
+
+                        let labelName = det.label;
+                        if (det.label === 'person') labelName = 'Manusia';
+                        else if (det.label === 'fire') labelName = 'API!';
+                        else if (det.label === 'smoke') labelName = 'ASAP!';
+                        else {
+                            // Kapitalisasi huruf pertama
+                            labelName = det.label.charAt(0).toUpperCase() + det.label.slice(1);
+                        }
+
+                        labelSpan.textContent = `${labelName} ${Math.round(det.confidence * 100)}%`;
+                        boxDiv.appendChild(labelSpan);
+                        boxesLayer.appendChild(boxDiv);
+                    });
+                }
 
                 if (status === 'Memasak') {
                     statKitchenStatus.className = 'stat-val text-cooking';
@@ -1189,10 +1311,13 @@
             modalImageViewer.classList.add('active');
         }
 
-        // Polling Data Dashboard
+        // Inisialisasi awal saat halaman dimuat
+        fetchSettings().then(() => {
+            updateLiveROI();
+        });
         fetchStats();
         fetchLog();
-        setInterval(fetchStats, 1000);
+        setInterval(fetchStats, 250); // Polling lebih cepat (4 kali per detik) untuk melukis box real-time yang responsif
         setInterval(fetchLog, 3000);
 
         // ==========================================
