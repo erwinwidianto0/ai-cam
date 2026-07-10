@@ -74,7 +74,7 @@ func loadConfig() error {
 			VLMProvider:        "gemini",
 			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
-			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia).",
+			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dan peringatan dini kebakaran dalam bahasa Indonesia).",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
