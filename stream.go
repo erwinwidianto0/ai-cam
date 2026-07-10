@@ -190,7 +190,8 @@ func (sp *StreamProcessor) Start() {
 						"-probesize", "32",          // Ukuran probe minimal
 						"-rtsp_transport", "tcp",
 						"-i", sp.rtspURL,
-						"-r", "30", // Paksa output stabil di 30 FPS
+						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
+						"-r", "30",                  // Paksa output stabil di 30 FPS
 						"-f", "image2pipe",
 						"-vcodec", "mjpeg",
 						"-q:v", "4",
@@ -204,7 +205,8 @@ func (sp *StreamProcessor) Start() {
 						"-re",
 						"-stream_loop", "-1",
 						"-i", sp.rtspURL,
-						"-r", "30", // Paksa output stabil di 30 FPS
+						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
+						"-r", "30",                  // Paksa output stabil di 30 FPS
 						"-f", "image2pipe",
 						"-vcodec", "mjpeg",
 						"-q:v", "4",
