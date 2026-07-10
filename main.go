@@ -347,7 +347,12 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	processorMu.Unlock()
 
 	configMu.RLock()
-	geminiActive := config.GeminiAPIKey != ""
+	geminiActive := false
+	if config.VLMProvider == "openai" {
+		geminiActive = (config.OpenAIAPIKey != "")
+	} else {
+		geminiActive = (config.GeminiAPIKey != "")
+	}
 	configMu.RUnlock()
 
 	response := map[string]interface{}{
