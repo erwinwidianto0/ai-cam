@@ -1010,8 +1010,10 @@
                 if (boxesLayer) {
                     boxesLayer.innerHTML = '';
                     const detections = data.detections || [];
-                    const imgWidth = liveVideo.naturalWidth || 640;
-                    const imgHeight = liveVideo.naturalHeight || 360;
+                    let imgWidth = liveVideo.naturalWidth || 640;
+                    let imgHeight = liveVideo.naturalHeight || 360;
+                    if (imgWidth <= 0) imgWidth = 640;
+                    if (imgHeight <= 0) imgHeight = 360;
 
                     detections.forEach(det => {
                         const xMin = det.box[0] / imgWidth;
