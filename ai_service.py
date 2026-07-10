@@ -10,11 +10,11 @@ app = FastAPI(title="YOLOv8 Inference Service", description="Local AI service fo
 
 from huggingface_hub import hf_hub_download
 
-# Memuat model YOLOv8 (yolov8n.pt untuk manusia, rabahdev/fire-smoke-yolov8n untuk api/asap)
+# Memuat model (yolo26n.pt (YOLO26) untuk manusia, rabahdev/fire-smoke-yolov8n untuk api/asap)
 try:
-    print("Loading YOLOv8 person model...")
-    model_person = YOLO("yolov8n.pt")
-    print("YOLOv8 person model loaded successfully.")
+    print("Loading YOLO26 person model...")
+    model_person = YOLO("yolo26n.pt")
+    print("YOLO26 person model loaded successfully.")
     
     print("Downloading/Loading YOLOv8 fire/smoke model from Hugging Face...")
     fire_ckpt = hf_hub_download(repo_id="rabahdev/fire-smoke-yolov8n", filename="best.pt")
