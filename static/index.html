@@ -206,6 +206,9 @@
                     <div class="actions-group-left">
                         <button id="btn-label-clear" class="btn btn-secondary">Hapus Semua Box</button>
                         <button id="btn-label-upload-more" class="btn btn-secondary">Upload Foto Baru</button>
+                        <button id="btn-label-auto" class="btn btn-secondary" style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; border: none; font-weight: 500;">
+                            ✨ Auto-Label AI
+                        </button>
                     </div>
                     <button id="btn-label-save" class="btn btn-primary">Simpan & Lanjut</button>
                 </div>
@@ -1254,6 +1257,86 @@
             if (el) el.remove();
             renderBoxesList();
         };
+
+        // Auto-Label dengan bantuan AI kustom Anda secara otomatis
+        document.getElementById('btn-label-auto').addEventListener('click', async () => {
+            const files = currentViewMode === 'raw' ? rawImages : labeledImages;
+            if (files.length === 0) return;
+
+            const filename = files[currentImageIndex];
+            const btnAuto = document.getElementById('btn-label-auto');
+            const originalText = btnAuto.innerHTML;
+
+            btnAuto.disabled = true;
+            btnAuto.innerHTML = '⚡ Memproses AI...';
+
+            try {
+                const res = await fetch(`/api/label/autodetect?filename=${encodeURIComponent(filename)}&type=${currentViewMode}`);
+                const result = await res.json();
+
+                if (result.status === 'success') {
+                    const detections = result.detections || [];
+                    if (detections.length === 0) {
+                        alert("AI tidak mendeteksi objek apa pun pada gambar ini dengan tingkat kepercayaan saat ini.");
+                        return;
+                    }
+
+                    // Bersihkan gambar & daftar box lama untuk diganti hasil auto-label
+                    drawnBoxes = [];
+                    labelingDrawLayer.innerHTML = '';
+
+                    detections.forEach(det => {
+                        // det.box adalah [x1, y1, x2, y2] absolut
+                        // Normalisasikan koordinat ke persen
+                        const xMin = det.box[0] / labelingImage.naturalWidth;
+                        const yMin = det.box[1] / labelingImage.naturalHeight;
+                        const xMax = det.box[2] / labelingImage.naturalWidth;
+                        const yMax = det.box[3] / labelingImage.naturalHeight;
+
+                        // Petakan label standar YOLO ke penamaan bahasa Indonesia Anda agar cocok
+                        let mappedLabel = det.label;
+                        if (det.label === 'person') mappedLabel = 'manusia';
+                        else if (det.label === 'fire') mappedLabel = 'api';
+                        else if (det.label === 'smoke') mappedLabel = 'asap';
+
+                        const boxId = Date.now() + Math.floor(Math.random() * 1000);
+                        drawnBoxes.push({
+                            id: boxId,
+                            xMin: xMin,
+                            yMin: yMin,
+                            xMax: xMax,
+                            yMax: yMax,
+                            label: mappedLabel
+                        });
+
+                        // Gambar rect visual di kanvas
+                        const rectDiv = document.createElement('div');
+                        rectDiv.className = 'label-rect';
+                        rectDiv.setAttribute('id', `box-rect-${boxId}`);
+                        rectDiv.style.left = `${xMin * 100}%`;
+                        rectDiv.style.top = `${yMin * 100}%`;
+                        rectDiv.style.width = `${(xMax - xMin) * 100}%`;
+                        rectDiv.style.height = `${(yMax - yMin) * 100}%`;
+
+                        const badge = document.createElement('span');
+                        badge.className = 'rect-badge';
+                        badge.innerText = mappedLabel;
+                        rectDiv.appendChild(badge);
+
+                        labelingDrawLayer.appendChild(rectDiv);
+                    });
+
+                    renderBoxesList();
+                } else {
+                    alert(`Gagal auto-labeling: ${result.message}`);
+                }
+            } catch (err) {
+                alert(`Error saat memproses auto-labeling: ${err}`);
+            } finally {
+                btnAuto.disabled = false;
+                btnAuto.innerHTML = originalText;
+            }
+        });
 
         // Simpan koordinat label & gambar kustom ke folder train
         document.getElementById('btn-label-save').addEventListener('click', async () => {

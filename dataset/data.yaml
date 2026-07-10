@@ -1,5 +1,5 @@
 path: ./dataset
 train: images/train
 val: images/train
-nc: 7
-names: ['api', 'pemadam api', 'asap', 'manusia', 'mobil', 'dua mobil', 'motor']
+nc: 8
+names: ['api', 'pemadam api', 'asap', 'manusia', 'mobil', 'dua mobil', 'motor', '1 (satu) botoh air mineral 220mili']

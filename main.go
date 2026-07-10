@@ -200,6 +200,7 @@ func main() {
 	http.HandleFunc("/api/label/save", handleAPILabelSave)
 	http.HandleFunc("/api/label/upload", handleAPILabelUpload)
 	http.HandleFunc("/api/label/images-labeled", handleAPILabelImagesLabeled)
+	http.HandleFunc("/api/label/autodetect", handleAPILabelAutoDetect)
 	http.HandleFunc("/api/train/start", handleAPITrainStart)
 	http.HandleFunc("/api/train/status", handleAPITrainStatus)
 	http.HandleFunc("/api/train/stop", handleAPITrainStop)
@@ -1081,4 +1082,62 @@ func handleAPILabelImagesLabeled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(fileList)
+}
+
+// handleAPILabelAutoDetect melakukan inferensi AI pada gambar dataset mentah/terlabeli untuk autolabeling
+func handleAPILabelAutoDetect(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "GET" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	filename := r.URL.Query().Get("filename")
+	viewMode := r.URL.Query().Get("type") // "raw" atau "labeled"
+
+	if filename == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Filename is required"})
+		return
+	}
+
+	var imgPath string
+	if viewMode == "labeled" {
+		imgPath = filepath.Join("dataset", "images", "train", filename)
+	} else {
+		imgPath = filepath.Join("dataset", "raw", filename)
+	}
+
+	// Baca byte gambar
+	imgBytes, err := os.ReadFile(imgPath)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal membaca file gambar: %v", err)})
+		return
+	}
+
+	// Dapatkan AI Client dari streamProcessor global
+	processorMu.Lock()
+	if streamProcessor == nil || streamProcessor.aiClient == nil {
+		processorMu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Layanan AI Client belum diinisialisasi"})
+		return
+	}
+	aiClient := streamProcessor.aiClient
+	processorMu.Unlock()
+
+	// Panggil deteksi AI ke python service
+	detections, err := aiClient.Detect(imgBytes)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal mendeteksi via AI: %v", err)})
+		return
+	}
+
+	// Kembalikan daftar deteksi
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "success",
+		"detections": detections,
+	})
 }
