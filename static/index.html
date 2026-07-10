@@ -62,6 +62,8 @@
                     <div id="roi-overlay" class="roi-overlay-visual">
                         <span class="roi-label-visual">Area Deteksi Kompor (ROI)</span>
                     </div>
+                    <!-- Layer Transparan untuk Klik-Drag Gambar ROI -->
+                    <div id="roi-draw-layer" class="roi-draw-layer"></div>
                     <div class="video-overlay-offline" id="video-offline-msg">
                         <div class="offline-icon">
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
@@ -225,9 +227,13 @@
 
         // Overlay ROI dinamis
         const roiOverlay = document.getElementById('roi-overlay');
+        const drawLayer = document.getElementById('roi-draw-layer');
         const sliders = ['zone-x-min', 'zone-y-min', 'zone-x-max', 'zone-y-max'];
 
         let isVideoOnline = true;
+        let isDrawing = false;
+        let startX = 0;
+        let startY = 0;
 
         // Mengupdate tampilan kotak overlay pratinjau (ROI) di video
         function updateROIOverlay() {
@@ -260,10 +266,82 @@
             document.getElementById(id).addEventListener('input', updateROIOverlay);
         });
 
-        // Buka Modal Pengaturan & Tampilkan Overlay ROI
+        // LOGIKA KLIK & DRAG MOUSE UNTUK MENGGAMBAR KOTAK ROI
+        drawLayer.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = drawLayer.getBoundingClientRect();
+            
+            // Dapatkan koordinat awal klik mouse relatif terhadap video-container
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+
+            const xMin = startX / rect.width;
+            const yMin = startY / rect.height;
+
+            // Set nilai awal di form
+            document.getElementById('zone-x-min').value = xMin;
+            document.getElementById('zone-y-min').value = yMin;
+            document.getElementById('zone-x-max').value = xMin;
+            document.getElementById('zone-y-max').value = yMin;
+
+            updateROIOverlay();
+        });
+
+        drawLayer.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = drawLayer.getBoundingClientRect();
+            
+            // Dapatkan koordinat seret mouse terkini
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+
+            let x1 = startX;
+            let y1 = startY;
+            let x2 = currentX;
+            let y2 = currentY;
+
+            // Tukar posisi jika diseret berlawanan arah (kiri/atas)
+            if (x2 < x1) {
+                let temp = x1;
+                x1 = x2;
+                x2 = temp;
+            }
+            if (y2 < y1) {
+                let temp = y1;
+                y1 = y2;
+                y2 = temp;
+            }
+
+            // Normalisasikan ke rasio 0.00 - 1.00
+            const xMin = Math.max(0, Math.min(1, x1 / rect.width));
+            const yMin = Math.max(0, Math.min(1, y1 / rect.height));
+            const xMax = Math.max(0, Math.min(1, x2 / rect.width));
+            const yMax = Math.max(0, Math.min(1, y2 / rect.height));
+
+            // Perbarui slider form
+            document.getElementById('zone-x-min').value = xMin;
+            document.getElementById('zone-y-min').value = yMin;
+            document.getElementById('zone-x-max').value = xMax;
+            document.getElementById('zone-y-max').value = yMax;
+
+            updateROIOverlay();
+        });
+
+        drawLayer.addEventListener('mouseup', () => {
+            isDrawing = false;
+        });
+
+        drawLayer.addEventListener('mouseleave', () => {
+            if (isDrawing) {
+                isDrawing = false;
+            }
+        });
+
+        // Buka Modal Pengaturan & Tampilkan Overlay ROI serta Draw Layer
         btnSettings.addEventListener('click', async () => {
             await fetchSettings();
             roiOverlay.style.display = 'block';
+            drawLayer.style.display = 'block'; // Aktifkan interaksi klik-drag di atas CCTV
             updateROIOverlay();
             modalSettings.classList.add('active');
         });
@@ -272,6 +350,7 @@
         const hideSettings = () => {
             modalSettings.classList.remove('active');
             roiOverlay.style.display = 'none';
+            drawLayer.style.display = 'none'; // Sembunyikan interaksi klik-drag
         };
         btnCloseSettings.addEventListener('click', hideSettings);
         btnCancelSettings.addEventListener('click', hideSettings);
