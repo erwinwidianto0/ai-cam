@@ -50,6 +50,12 @@ type StreamProcessor struct {
 	fps           float64
 	aiLatency     time.Duration
 	aiStatus      string // "Online", "Offline"
+
+	statusMu       sync.Mutex
+	lastDetections []AIDetection
+	detectionsMu   sync.Mutex
+	aiBusy         bool
+	aiBusyMu       sync.Mutex
 }
 
 // NewStreamProcessor membuat instansi baru StreamProcessor
@@ -177,17 +183,51 @@ func (sp *StreamProcessor) Start() {
 					continue
 				}
 
-				// Scanner dengan buffer besar (maks 2MB)
-				scanner := bufio.NewScanner(stdout)
-				buf := make([]byte, 1024*1024)
-				scanner.Buffer(buf, 2*1024*1024)
-				scanner.Split(splitJPEG)
+				// Channel berkapasitas 1 (lossy channel)
+				frameChan := make(chan []byte, 1)
+
+				// Goroutine Pembaca Frame dari FFmpeg stdout secara asinkron
+				go func() {
+					scanner := bufio.NewScanner(stdout)
+					buf := make([]byte, 1024*1024)
+					scanner.Buffer(buf, 2*1024*1024)
+					scanner.Split(splitJPEG)
+
+					for scanner.Scan() {
+						jpegData := scanner.Bytes()
+						if len(jpegData) == 0 {
+							continue
+						}
+
+						// Duplikasi byte frame karena buffer Scanner internal akan ditimpa
+						frameCopy := make([]byte, len(jpegData))
+						copy(frameCopy, jpegData)
+
+						// Kirim ke channel secara non-blocking
+						select {
+						case frameChan <- frameCopy:
+						default:
+							// Buang frame lama jika channel penuh
+							select {
+							case <-frameChan:
+							default:
+							}
+							frameChan <- frameCopy
+						}
+					}
+					close(frameChan)
+				}()
 
 				lastAIDetectTime := time.Time{}
 				frameCount := 0
 				fpsLastTime := time.Now()
 
-				for scanner.Scan() {
+				// Bersihkan data deteksi lama saat memulai koneksi baru
+				sp.detectionsMu.Lock()
+				sp.lastDetections = nil
+				sp.detectionsMu.Unlock()
+
+				for jpegData := range frameChan {
 					select {
 					case <-sp.stopChan:
 						cmd.Process.Kill()
@@ -195,53 +235,70 @@ func (sp *StreamProcessor) Start() {
 					default:
 					}
 
-					jpegData := scanner.Bytes()
-					if len(jpegData) == 0 {
-						continue
-					}
+					now := time.Now()
 
+					// Hitung FPS visual stream
 					frameCount++
 					if frameCount >= 30 {
-						now := time.Now()
 						elapsed := now.Sub(fpsLastTime).Seconds()
+						sp.statusMu.Lock()
 						sp.fps = float64(frameCount) / elapsed
+						sp.statusMu.Unlock()
 						frameCount = 0
 						fpsLastTime = now
 					}
 
-					// Batasi pengiriman ke AI (sekitar 5 frame per detik / setiap 200ms)
-					var detections []AIDetection
-					var aiErr error
-					now := time.Now()
-					
-					runAI := now.Sub(lastAIDetectTime) >= 200*time.Millisecond
+					// Panggil AI secara asinkron (setiap 200ms jika sedang tidak sibuk)
+					sp.aiBusyMu.Lock()
+					busy := sp.aiBusy
+					sp.aiBusyMu.Unlock()
 
-					if runAI {
+					if now.Sub(lastAIDetectTime) >= 200*time.Millisecond && !busy {
 						lastAIDetectTime = now
-						aiStart := time.Now()
-						detections, aiErr = sp.aiClient.Detect(jpegData)
-						sp.aiLatency = time.Since(aiStart)
-						
-						if aiErr != nil {
-							sp.aiStatus = "Offline"
-						} else {
-							sp.aiStatus = "Online"
-						}
+
+						sp.aiBusyMu.Lock()
+						sp.aiBusy = true
+						sp.aiBusyMu.Unlock()
+
+						// Kirim deteksi ke background
+						go func(img []byte) {
+							aiStart := time.Now()
+							detections, aiErr := sp.aiClient.Detect(img)
+							latency := time.Since(aiStart)
+
+							sp.aiBusyMu.Lock()
+							sp.aiBusy = false
+							sp.aiBusyMu.Unlock()
+
+							sp.statusMu.Lock()
+							sp.aiLatency = latency
+							if aiErr != nil {
+								sp.aiStatus = "Offline"
+								// Kosongkan deteksi jika offline agar kotak tidak melayang selamanya
+								sp.detectionsMu.Lock()
+								sp.lastDetections = nil
+								sp.detectionsMu.Unlock()
+							} else {
+								sp.aiStatus = "Online"
+								sp.detectionsMu.Lock()
+								sp.lastDetections = detections
+								sp.detectionsMu.Unlock()
+							}
+							sp.statusMu.Unlock()
+						}(jpegData)
 					}
+
+					// Salin deteksi terakhir untuk digambar pada frame ini
+					sp.detectionsMu.Lock()
+					var detections []AIDetection
+					if sp.lastDetections != nil {
+						detections = make([]AIDetection, len(sp.lastDetections))
+						copy(detections, sp.lastDetections)
+					}
+					sp.detectionsMu.Unlock()
 
 					// Proses logika deteksi ROI dapur & penggambaran bounding box
-					var processedJPEG []byte
-					if aiErr == nil {
-						processedJPEG, _, _ = sp.drawBoundingBoxes(jpegData, detections)
-					} else {
-						// Fallback ketika AI Offline: tetap update timer zona (agar tidak nge-lock)
-						// dan tetap gambar garis zona di layar video
-						processedJPEG, _, _ = sp.drawBoundingBoxes(jpegData, nil)
-						
-						if runAI {
-							log.Printf("Layanan AI offline: %v", aiErr)
-						}
-					}
+					processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
 
 					// Simpan frame terbaru untuk klien baru
 					sp.currentFrameMu.Lock()
@@ -252,12 +309,9 @@ func (sp *StreamProcessor) Start() {
 					sp.broadcast(processedJPEG)
 				}
 
-				if err := scanner.Err(); err != nil {
-					log.Printf("Error pembacaan stream scanner: %v", err)
+				if err := cmd.Wait(); err != nil {
+					log.Printf("Proses FFmpeg berhenti: %v", err)
 				}
-
-				cmd.Process.Kill()
-				cmd.Wait()
 				log.Println("Proses FFmpeg berhenti. Melakukan koneksi ulang dalam 3 detik...")
 				time.Sleep(3 * time.Second)
 			}
