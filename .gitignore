@@ -1,0 +1,26 @@
+# Database SQLite
+aicam.db
+aicam.db-journal
+
+# Konfigurasi privat (berisi password CCTV)
+config.json
+
+# Model AI (otomatis diunduh saat dijalankan)
+yolov8n.pt
+
+# Snapshot deteksi orang
+snapshots/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Go Executables & Temporary Files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+aicam

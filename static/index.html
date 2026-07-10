@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-CAM | CCTV Person Detection & Analytics</title>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Link to custom style -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" fill="url(#logo-grad)" />
+                        <path d="M12 21C16.9706 21 21 16.9706 21 12C21 7.02944 16.9706 3 12 3C7.02944 3 3 7.02944 3 12C3 16.9706 7.02944 21 12 21Z" stroke="url(#logo-grad)" stroke-width="2" stroke-dasharray="2 2" />
+                        <path d="M7 12C7 9.23858 9.23858 7 12 7" stroke="url(#logo-grad)" stroke-width="2" stroke-linecap="round" />
+                        <defs>
+                            <linearGradient id="logo-grad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#6366f1" />
+                                <stop offset="1" stop-color="#a855f7" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>AI-CAM</h1>
+                    <span>CCTV Inteligensi Buatan</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="btn-settings" class="btn btn-secondary">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    Pengaturan
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-grid">
+            <!-- Left Side: Live Monitor -->
+            <section class="monitor-card card">
+                <div class="card-header">
+                    <div class="title-with-status">
+                        <span class="status-indicator live" id="stream-status-dot"></span>
+                        <h2>Live Stream CCTV</h2>
+                    </div>
+                    <div class="stream-stats" id="stream-fps-badge">0.0 FPS</div>
+                </div>
+                <div class="video-container">
+                    <!-- Standard MJPEG streaming via Go handler -->
+                    <img id="live-video" src="/stream" alt="Live CCTV Feed" onerror="handleVideoError()">
+                    <div class="video-overlay-offline" id="video-offline-msg">
+                        <div class="offline-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                        </div>
+                        <h3>Koneksi CCTV Terputus</h3>
+                        <p>Pastikan URL RTSP benar dan perangkat FFmpeg terinstal serta aktif.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Side: Stats and Log Detections -->
+            <div class="sidebar-grid">
+                <!-- Stats Row -->
+                <section class="stats-panel">
+                    <div class="stat-card card">
+                        <div class="stat-icon purple">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Terdeteksi Hari Ini</span>
+                            <span class="stat-val" id="stat-today">0</span>
+                        </div>
+                    </div>
+                    <div class="stat-card card">
+                        <div class="stat-icon blue" id="ai-status-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Status Model AI</span>
+                            <span class="stat-val status-text text-offline" id="stat-ai-status">Offline</span>
+                        </div>
+                    </div>
+                    <div class="stat-card card">
+                        <div class="stat-icon green">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">AI Latency</span>
+                            <span class="stat-val" id="stat-latency">0 ms</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Detections History Log -->
+                <section class="log-card card">
+                    <div class="card-header">
+                        <h2>Riwayat Aktivitas Deteksi</h2>
+                        <div class="header-action-badge">Manusia</div>
+                    </div>
+                    <div class="log-container" id="events-log-list">
+                        <!-- Items dynamically loaded -->
+                        <div class="empty-state">
+                            <p>Belum ada aktivitas terdeteksi.</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal-overlay">
+        <div class="modal-content card">
+            <div class="modal-header">
+                <h2>Konfigurasi CCTV & AI</h2>
+                <button class="btn-close-modal" id="btn-close-settings">&times;</button>
+            </div>
+            <form id="form-settings">
+                <div class="form-group">
+                    <label for="rtsp-url">RTSP CCTV URL</label>
+                    <input type="text" id="rtsp-url" name="rtsp_url" required placeholder="rtsp://username:password@ip:port/stream">
+                    <small>Pastikan format URL RTSP didukung oleh FFmpeg (TCP direkomendasikan).</small>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ai-endpoint">AI Service Endpoint</label>
+                        <input type="text" id="ai-endpoint" name="ai_endpoint" required placeholder="http://127.0.0.1:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="conf-threshold">Confidence Threshold (0.1 - 1.0)</label>
+                        <input type="number" id="conf-threshold" name="conf_threshold" required step="0.05" min="0.1" max="1.0" value="0.55">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-settings">Batal</button>
+                    <button type="submit" class="btn btn-primary">Simpan & Terapkan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Image Viewer Modal -->
+    <div id="modal-image-viewer" class="modal-overlay">
+        <div class="modal-content-img">
+            <button class="btn-close-modal-img" id="btn-close-img-viewer">&times;</button>
+            <div class="snapshot-display-container">
+                <img id="viewer-img" src="" alt="Snapshot Detail">
+                <div class="snapshot-details" id="viewer-details">
+                    <span class="badge red">MANUSIA TERDETEKSI</span>
+                    <span id="viewer-time">12:34:56</span>
+                    <span id="viewer-confidence">95%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client-side script -->
+    <script>
+        const liveVideo = document.getElementById('live-video');
+        const videoOfflineMsg = document.getElementById('video-offline-msg');
+        const streamStatusDot = document.getElementById('stream-status-dot');
+        const streamFpsBadge = document.getElementById('stream-fps-badge');
+        
+        const statToday = document.getElementById('stat-today');
+        const statAiStatus = document.getElementById('stat-ai-status');
+        const statLatency = document.getElementById('stat-latency');
+        const activeViewers = document.getElementById('active-viewers');
+        const eventsLogList = document.getElementById('events-log-list');
+
+        const modalSettings = document.getElementById('modal-settings');
+        const btnSettings = document.getElementById('btn-settings');
+        const btnCloseSettings = document.getElementById('btn-close-settings');
+        const btnCancelSettings = document.getElementById('btn-cancel-settings');
+        const formSettings = document.getElementById('form-settings');
+
+        const modalImageViewer = document.getElementById('modal-image-viewer');
+        const btnCloseImgViewer = document.getElementById('btn-close-img-viewer');
+        const viewerImg = document.getElementById('viewer-img');
+        const viewerTime = document.getElementById('viewer-time');
+        const viewerConfidence = document.getElementById('viewer-confidence');
+
+        let isVideoOnline = true;
+
+        // Buka / Tutup Modal Pengaturan
+        btnSettings.addEventListener('click', () => {
+            fetchSettings();
+            modalSettings.classList.add('active');
+        });
+
+        const hideSettings = () => modalSettings.classList.remove('active');
+        btnCloseSettings.addEventListener('click', hideSettings);
+        btnCancelSettings.addEventListener('click', hideSettings);
+
+        // Tutup Modal Image Viewer
+        btnCloseImgViewer.addEventListener('click', () => {
+            modalImageViewer.classList.remove('active');
+        });
+
+        modalImageViewer.addEventListener('click', (e) => {
+            if (e.target === modalImageViewer) {
+                modalImageViewer.classList.remove('active');
+            }
+        });
+
+        // Tangani Error Video
+        function handleVideoError() {
+            if (isVideoOnline) {
+                isVideoOnline = false;
+                liveVideo.style.display = 'none';
+                videoOfflineMsg.style.display = 'flex';
+                streamStatusDot.className = 'status-indicator offline';
+                streamFpsBadge.textContent = '0.0 FPS';
+            }
+        }
+
+        // Jalankan reload video jika error
+        setInterval(() => {
+            if (!isVideoOnline) {
+                // Mencoba memuat kembali stream
+                liveVideo.src = "/stream?t=" + new Date().getTime();
+                liveVideo.style.display = 'block';
+                videoOfflineMsg.style.display = 'none';
+                isVideoOnline = true;
+                streamStatusDot.className = 'status-indicator live';
+            }
+        }, 5000);
+
+        // Mengambil Pengaturan dari Backend
+        async function fetchSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const data = await response.json();
+                document.getElementById('rtsp-url').value = data.rtsp_url;
+                document.getElementById('ai-endpoint').value = data.ai_endpoint;
+                document.getElementById('conf-threshold').value = data.conf_threshold;
+            } catch (err) {
+                console.error("Gagal mengambil konfigurasi: ", err);
+            }
+        }
+
+        // Menyimpan Pengaturan Baru
+        formSettings.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(formSettings);
+            const payload = {
+                rtsp_url: formData.get('rtsp_url'),
+                ai_endpoint: formData.get('ai_endpoint'),
+                conf_threshold: parseFloat(formData.get('conf_threshold'))
+            };
+
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    hideSettings();
+                    // Paksa memuat ulang video feed setelah pengaturan berubah
+                    setTimeout(() => {
+                        liveVideo.src = "/stream?t=" + new Date().getTime();
+                    }, 1000);
+                } else {
+                    alert("Error: " + result.error);
+                }
+            } catch (err) {
+                console.error("Gagal memperbarui konfigurasi: ", err);
+                alert("Gagal memperbarui konfigurasi.");
+            }
+        });
+
+        // Mengambil Statistik Terkini
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+
+                statToday.textContent = data.detections_today;
+                streamFpsBadge.textContent = data.stream_fps + " FPS";
+                statLatency.textContent = data.ai_latency_ms + " ms";
+
+                const aiStatusText = document.getElementById('stat-ai-status');
+                aiStatusText.textContent = data.ai_status;
+                if (data.ai_status === 'Online') {
+                    aiStatusText.className = 'stat-val status-text text-online';
+                    document.getElementById('ai-status-icon').className = 'stat-icon green';
+                } else {
+                    aiStatusText.className = 'stat-val status-text text-offline';
+                    document.getElementById('ai-status-icon').className = 'stat-icon red';
+                }
+            } catch (err) {
+                console.error("Gagal memuat statistik: ", err);
+            }
+        }
+
+        // Mengambil Log Deteksi Terbaru
+        async function fetchLog() {
+            try {
+                const response = await fetch('/api/events?limit=15');
+                const events = await response.json();
+
+                if (!events || events.length === 0) {
+                    eventsLogList.innerHTML = `
+                        <div class="empty-state">
+                            <p>Belum ada aktivitas terdeteksi.</p>
+                        </div>`;
+                    return;
+                }
+
+                eventsLogList.innerHTML = '';
+                events.forEach(event => {
+                    const date = new Date(event.timestamp);
+                    const timeStr = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const dateStr = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+                    const confPercent = Math.round(event.confidence * 100) + "%";
+
+                    const item = document.createElement('div');
+                    item.className = 'log-item';
+                    item.innerHTML = `
+                        <div class="log-info">
+                            <div class="log-indicator red"></div>
+                            <div class="log-text">
+                                <span class="log-title">Manusia Terdeteksi</span>
+                                <span class="log-subtitle">${dateStr} • ${timeStr} • Confidence: <strong>${confPercent}</strong></span>
+                            </div>
+                        </div>
+                        <button class="btn-view-snapshot btn btn-secondary" onclick="viewSnapshot('/snapshots/${event.snapshot_path}', '${timeStr}', '${confPercent}')">
+                            Foto
+                        </button>
+                    `;
+                    eventsLogList.appendChild(item);
+                });
+            } catch (err) {
+                console.error("Gagal memuat log deteksi: ", err);
+            }
+        }
+
+        // Tampilkan Snapshot Gambar di Modal
+        function viewSnapshot(url, time, confidence) {
+            viewerImg.src = url;
+            viewerTime.textContent = time;
+            viewerConfidence.textContent = confidence;
+            modalImageViewer.classList.add('active');
+        }
+
+        // Polling Data Dashboard
+        fetchStats();
+        fetchLog();
+        setInterval(fetchStats, 2000);
+        setInterval(fetchLog, 3000);
+    </script>
+</body>
+</html>
