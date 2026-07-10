@@ -27,3 +27,5 @@ aicam
 
 # VS Code Local Configuration
 .vscode/
+pyrefly.toml
+
