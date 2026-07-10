@@ -75,7 +75,7 @@ func loadConfig() error {
 			VLMProvider:        "gemini",
 			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
-			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian, analisis peringatan dini, serta identifikasi SUMBER atau ASAL objek pemicu api/asap jika terdeteksi, dalam bahasa Indonesia).",
+			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau bersandar pasif di kursi dengan mata terpejam lama layaknya terlelap (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian, analisis peringatan dini, serta identifikasi SUMBER atau ASAL objek pemicu api/asap jika terdeteksi, dalam bahasa Indonesia).",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -1133,6 +1133,11 @@ func detectObjectsWithGemini(imgBytes []byte, apiKey string) ([]AIDetection, err
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
 Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
 
+PENTING UNTUK AKURASI KELAS:
+- Jika ada orang sedang tidur/terlelap, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau duduk bersandar pasif di kursi dengan mata terpejam lama, beri label 'tidur' (jangan 'manusia').
+- Jika ada orang sedang merokok, beri label 'merokok' (jangan 'manusia').
+- Jika ada api atau asap, beri label 'api' atau 'asap'.
+
 Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
 Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
 Tambahkan estimasi tingkat kepercayaan key "confidence" dari 0.0 sampai 1.0.
@@ -1422,6 +1427,11 @@ func detectObjectsWithOpenAI(imgBytes []byte, apiKey string) ([]AIDetection, err
 
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
 Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
+
+PENTING UNTUK AKURASI KELAS:
+- Jika ada orang sedang tidur/terlelap, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau duduk bersandar pasif di kursi dengan mata terpejam lama, beri label 'tidur' (jangan 'manusia').
+- Jika ada orang sedang merokok, beri label 'merokok' (jangan 'manusia').
+- Jika ada api atau asap, beri label 'api' atau 'asap'.
 
 Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
 Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
