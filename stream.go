@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -768,6 +769,9 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		jsonBytes, err := json.Marshal(reqPayload)
 		if err != nil {
 			log.Printf("Gagal marshal request payload Gemini: %v", err)
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: Gagal menyusun data request (%v)", err)
+			sp.statusMu.Unlock()
 			return
 		}
 
@@ -778,6 +782,9 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
 		if err != nil {
 			log.Printf("Gagal membuat HTTP request Gemini: %v", err)
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: Gagal inisialisasi request HTTP (%v)", err)
+			sp.statusMu.Unlock()
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -787,6 +794,9 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("Gagal menghubungi Gemini API: %v", err)
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: Tidak ada koneksi internet / gagal menghubungi Gemini API (%v)", err)
+			sp.statusMu.Unlock()
 			return
 		}
 		defer resp.Body.Close()
@@ -794,6 +804,9 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		if resp.StatusCode != http.StatusOK {
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			log.Printf("Gemini API mengembalikan status error: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: API mengembalikan kode %d (Periksa validitas Gemini API Key Anda)", resp.StatusCode)
+			sp.statusMu.Unlock()
 			return
 		}
 
@@ -801,19 +814,30 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		var geminiResp GeminiResponse
 		if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
 			log.Printf("Gagal decode response Gemini API: %v", err)
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: Gagal memproses data respons server (%v)", err)
+			sp.statusMu.Unlock()
 			return
 		}
 
 		if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
 			log.Printf("Gemini API tidak mengembalikan konten candidates.")
+			sp.statusMu.Lock()
+			sp.geminiDescription = "Error: Google Gemini mengembalikan hasil kosong (Candidates Empty)"
+			sp.statusMu.Unlock()
 			return
 		}
 
-		// Parsing JSON teks hasil generasi Gemini
+		// Parsing JSON teks hasil generasi Gemini (Sanitasi jika ada wrapper markdown)
 		rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+		cleanJSON := sanitizeJSON(rawText)
+
 		var result GeminiAnalysisResult
-		if err := json.Unmarshal([]byte(rawText), &result); err != nil {
+		if err := json.Unmarshal([]byte(cleanJSON), &result); err != nil {
 			log.Printf("Gagal unmarshal hasil teks Gemini ke JSON: %v. Raw text: %s", err, rawText)
+			sp.statusMu.Lock()
+			sp.geminiDescription = fmt.Sprintf("Error: Gagal membaca format teks kognitif AI (%v)", err)
+			sp.statusMu.Unlock()
 			return
 		}
 
@@ -834,6 +858,16 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 			go sp.saveFireSnapshot(jpegData)
 		}
 	}()
+}
+
+// sanitizeJSON membersihkan format JSON mentah dari blok tag markdown kustom (seperti ```json ... ```)
+func sanitizeJSON(input string) string {
+	start := strings.Index(input, "{")
+	end := strings.LastIndex(input, "}")
+	if start == -1 || end == -1 || start >= end {
+		return input
+	}
+	return input[start : end+1]
 }
 
 // saveFireSnapshot menyimpan snapshot bukti kebakaran ke disk & log ke database SQLite
