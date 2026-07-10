@@ -1261,7 +1261,7 @@ func detectObjectsWithGemini(imgBytes []byte, apiKey string) ([]AIDetection, err
 	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
 
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
-Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
+Deteksi secara akurat objek-objek penting apa pun yang ada di dalam gambar (seperti: 'manusia' (person), 'botol', 'cangkir', 'gelas', 'kursi', 'meja', 'wajan', 'panci', 'kompor', 'piring', 'makanan', 'api', 'asap', 'merokok', 'tidur', dll.). Beri label objek tersebut dalam Bahasa Indonesia atau Inggris yang umum sesuai jenis bendanya. 
 
 PENTING UNTUK AKURASI KELAS:
 - Jika ada orang sedang tidur/terlelap, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau duduk bersandar pasif di kursi dengan mata terpejam lama, beri label 'tidur' (jangan 'manusia').
@@ -1556,7 +1556,7 @@ func detectObjectsWithOpenAI(imgBytes []byte, apiKey string) ([]AIDetection, err
 	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
 
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
-Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
+Deteksi secara akurat objek-objek penting apa pun yang ada di dalam gambar (seperti: 'manusia' (person), 'botol', 'cangkir', 'gelas', 'kursi', 'meja', 'wajan', 'panci', 'kompor', 'piring', 'makanan', 'api', 'asap', 'merokok', 'tidur', dll.). Beri label objek tersebut dalam Bahasa Indonesia atau Inggris yang umum sesuai jenis bendanya. 
 
 PENTING UNTUK AKURASI KELAS:
 - Jika ada orang sedang tidur/terlelap, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau duduk bersandar pasif di kursi dengan mata terpejam lama, beri label 'tidur' (jangan 'manusia').
