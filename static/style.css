@@ -565,7 +565,7 @@ label {
     color: var(--text-secondary);
 }
 
-input[type="text"], input[type="number"] {
+input[type="text"], input[type="number"], input[type="password"], textarea {
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--border-color);
     padding: 12px 16px;
@@ -575,9 +575,10 @@ input[type="text"], input[type="number"] {
     font-size: 14px;
     transition: var(--transition-smooth);
     width: 100%;
+    resize: vertical; /* Mengizinkan penarikan tinggi textarea secara vertikal */
 }
 
-input:focus {
+input:focus, textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
     box-shadow: 0 0 8px rgba(99, 102, 241, 0.25);
