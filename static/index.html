@@ -74,6 +74,22 @@
                 </div>
             </section>
 
+            <!-- Gemini Description Panel -->
+            <section class="gemini-description-panel card">
+                <div class="card-header">
+                    <div class="gemini-header-title">
+                        <div class="gemini-logo-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C12 2 12 7 9 10C6 13 2 12 2 12C2 12 7 12 10 15C13 18 12 22 12 22C12 22 12 17 15 14C18 11 22 12 22 12C22 12 17 12 14 9C11 6 12 2 12 2Z" fill="url(#gemini-grad)"/><defs><linearGradient id="gemini-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs></svg>
+                        </div>
+                        <h2>Analisis Kognitif AI (Google Gemini VLM)</h2>
+                    </div>
+                    <span class="header-action-badge alert-idle" id="gemini-active-badge">CLOUD OFFLINE</span>
+                </div>
+                <div class="gemini-content-text" id="gemini-description-text">
+                    Menunggu analisis kognitif pertama dari Google Gemini API. Pastikan Anda telah memasukkan Gemini API Key di menu pengaturan.
+                </div>
+            </section>
+
             <!-- Right Side: Stats and Log Detections -->
             <div class="sidebar-grid">
                 <!-- Stats Row -->
@@ -95,6 +111,15 @@
                         <div class="stat-content">
                             <span class="stat-label">Status Model AI</span>
                             <span class="stat-val status-text text-offline" id="stat-ai-status">Offline</span>
+                        </div>
+                    </div>
+                    <div class="stat-card card" id="fire-status-card">
+                        <div class="stat-icon gray" id="fire-status-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Alarm Api (Gemini)</span>
+                            <span class="stat-val text-idle" id="stat-fire-status">Aman</span>
                         </div>
                     </div>
                     <div class="stat-card card">
@@ -174,6 +199,20 @@
                     <label for="cooking-trigger-secs">Durasi Pemicu Memasak (Detik)</label>
                     <input type="number" id="cooking-trigger-secs" name="cooking_trigger_secs" required min="1" max="60">
                     <small>Jumlah detik orang berdiri di dalam area untuk mengonfirmasi sedang memasak.</small>
+                </div>
+
+                <h3 class="settings-subtitle">Integrasi Cloud Gemini Hybrid AI</h3>
+                <p class="settings-desc">Koneksikan Google Gemini API untuk menganalisis kejadian kompleks secara kognitif seperti mendeteksi api, asap, atau aktivitas dapur lainnya.</p>
+
+                <div class="form-group">
+                    <label for="gemini-api-key">Gemini API Key (Google AI Studio)</label>
+                    <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Masukkan Kunci API Gemini Anda">
+                    <small>Dapatkan gratis di aistudio.google.com. Kosongkan untuk menonaktifkan.</small>
+                </div>
+                <div class="form-group">
+                    <label for="gemini-prompt">AI Prompt / Teks Instruksi Kustom</label>
+                    <textarea id="gemini-prompt" name="gemini_prompt" rows="5" placeholder="Tulis instruksi analisis kognitif Anda untuk Gemini..."></textarea>
+                    <small>Pastikan prompt menginstruksikan format JSON output dengan key: 'cooking' (bool), 'fire' (bool), dan 'description' (string).</small>
                 </div>
                 
                 <div class="modal-footer">
@@ -403,6 +442,8 @@
                 document.getElementById('zone-x-max').value = data.zone_x_max;
                 document.getElementById('zone-y-max').value = data.zone_y_max;
                 document.getElementById('cooking-trigger-secs').value = data.cooking_trigger_secs;
+                document.getElementById('gemini-api-key').value = data.gemini_api_key || "";
+                document.getElementById('gemini-prompt').value = data.gemini_prompt || "";
 
                 // Update overlay pratinjau
                 updateROIOverlay();
@@ -423,7 +464,9 @@
                 zone_y_min: parseFloat(formData.get('zone_y_min')),
                 zone_x_max: parseFloat(formData.get('zone_x_max')),
                 zone_y_max: parseFloat(formData.get('zone_y_max')),
-                cooking_trigger_secs: parseInt(formData.get('cooking_trigger_secs'))
+                cooking_trigger_secs: parseInt(formData.get('cooking_trigger_secs')),
+                gemini_api_key: formData.get('gemini_api_key'),
+                gemini_prompt: formData.get('gemini_prompt')
             };
 
             try {
@@ -488,6 +531,42 @@
                 } else {
                     aiStatusText.className = 'stat-val status-text text-offline';
                     document.getElementById('ai-status-icon').className = 'stat-icon red';
+                }
+
+                // Gemini VLM Status & Alarm Api
+                const fireStatusCard = document.getElementById('fire-status-card');
+                const fireStatusIcon = document.getElementById('fire-status-icon');
+                const fireStatusText = document.getElementById('stat-fire-status');
+                const geminiActiveBadge = document.getElementById('gemini-active-badge');
+                const geminiDescriptionText = document.getElementById('gemini-description-text');
+
+                // Update Deskripsi Gemini
+                if (data.gemini_description) {
+                    geminiDescriptionText.textContent = data.gemini_description;
+                    geminiActiveBadge.textContent = "API AKTIF";
+                    geminiActiveBadge.className = "header-action-badge alert-active";
+                } else {
+                    geminiDescriptionText.textContent = "Menunggu analisis kognitif pertama dari Google Gemini API. Pastikan Anda telah memasukkan Gemini API Key di menu pengaturan.";
+                    geminiActiveBadge.textContent = "CLOUD OFFLINE";
+                    geminiActiveBadge.className = "header-action-badge alert-idle";
+                }
+
+                // Update Alarm Kebakaran/Api
+                if (data.gemini_fire_alert) {
+                    fireStatusCard.className = "stat-card card alert-fire-active";
+                    fireStatusIcon.className = "stat-icon red-pulse";
+                    fireStatusText.textContent = "BAHAYA API!";
+                    fireStatusText.className = "stat-val text-cooking";
+                } else if (data.gemini_description) {
+                    fireStatusCard.className = "stat-card card";
+                    fireStatusIcon.className = "stat-icon green";
+                    fireStatusText.textContent = "Aman";
+                    fireStatusText.className = "stat-val text-online";
+                } else {
+                    fireStatusCard.className = "stat-card card";
+                    fireStatusIcon.className = "stat-icon gray";
+                    fireStatusText.textContent = "Nonaktif";
+                    fireStatusText.className = "stat-val text-idle";
                 }
             } catch (err) {
                 console.error("Gagal memuat statistik: ", err);

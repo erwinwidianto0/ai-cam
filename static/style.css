@@ -866,5 +866,89 @@ input[type="range"]::-webkit-slider-thumb:hover {
     background: rgba(0, 0, 0, 0.01); /* Memicu respon klik pada webkit browser */
 }
 
+/* ============================================================================
+   GAYA VISUAL GOOGLE GEMINI & ALARM KEBAKARAN
+   ============================================================================ */
+
+.gemini-description-panel {
+    margin-top: var(--spacing-md);
+    background: rgba(17, 24, 39, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.gemini-header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gemini-logo-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
+}
+
+.gemini-content-text {
+    padding: var(--spacing-md) var(--spacing-lg);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--color-text-muted);
+    font-style: italic;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: var(--radius-md);
+    margin: 0 var(--spacing-lg) var(--spacing-lg) var(--spacing-lg);
+    border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.settings-subtitle {
+    margin-top: var(--spacing-lg);
+    margin-bottom: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #38bdf8;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+    padding-bottom: 6px;
+}
+
+.settings-desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-md);
+    line-height: 1.4;
+}
+
+.text-online {
+    color: #10b981 !important;
+}
+
+.green {
+    background: rgba(16, 185, 129, 0.15) !important;
+    color: #10b981 !important;
+}
+
+/* Animasi & efek visual glow alarm kebakaran menyala */
+.alert-fire-active {
+    border: 1px solid rgba(239, 68, 68, 0.4) !important;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(17, 24, 39, 0.7) 100%) !important;
+    animation: fireBlink 1.5s infinite alternate ease-in-out;
+}
+
+@keyframes fireBlink {
+    0% {
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+    100% {
+        box-shadow: 0 0 25px rgba(239, 68, 68, 0.5);
+        border-color: rgba(239, 68, 68, 0.8);
+    }
+}
+
 
 

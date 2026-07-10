@@ -22,6 +22,8 @@ type Config struct {
 	ZoneXMax           float64 `json:"zone_x_max"`
 	ZoneYMax           float64 `json:"zone_y_max"`
 	CookingTriggerSecs int     `json:"cooking_trigger_secs"`
+	GeminiAPIKey       string  `json:"gemini_api_key"`
+	GeminiPrompt       string  `json:"gemini_prompt"`
 }
 
 var (
@@ -51,6 +53,8 @@ func loadConfig() error {
 			ZoneXMax:           0.70,
 			ZoneYMax:           0.90,
 			CookingTriggerSecs: 8, // 8 detik berada di kompor untuk memicu deteksi memasak
+			GeminiAPIKey:       "",
+			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia).",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -70,13 +74,21 @@ func loadConfig() error {
 	}
 
 	// Tambahkan fallback nilai default jika variabel baru belum ada di config.json
+	updated := false
 	if config.ZoneXMax == 0 && config.ZoneYMax == 0 {
 		config.ZoneXMin = 0.30
 		config.ZoneYMin = 0.20
 		config.ZoneXMax = 0.70
 		config.ZoneYMax = 0.90
 		config.CookingTriggerSecs = 8
-		
+		updated = true
+	}
+	if config.GeminiPrompt == "" {
+		config.GeminiPrompt = "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia)."
+		updated = true
+	}
+
+	if updated {
 		// Simpan perubahan secara diam-diam agar config.json ter-update
 		fileOut, _ := json.MarshalIndent(config, "", "  ")
 		os.WriteFile(configPath, fileOut, 0644)
@@ -131,6 +143,8 @@ func main() {
 		config.ZoneXMax,
 		config.ZoneYMax,
 		config.CookingTriggerSecs,
+		config.GeminiAPIKey,
+		config.GeminiPrompt,
 	)
 	streamProcessor.Start()
 	defer streamProcessor.Stop()
@@ -258,18 +272,26 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	clientsCount := len(streamProcessor.clients)
 	kitchenStatus := streamProcessor.kitchenStatus
 	secondsInZone := streamProcessor.secondsInZone
+	
+	// Data baru dari integrasi Gemini VLM
+	geminiFireAlert := streamProcessor.geminiFireAlert
+	geminiCookingAlert := streamProcessor.geminiCookingAlert
+	geminiDescription := streamProcessor.geminiDescription
 	processorMu.Unlock()
 
 	response := map[string]interface{}{
-		"total_detections":  dbStats.TotalDetections,
-		"detections_today":  dbStats.DetectionsToday,
-		"stream_fps":        mathRound(fps, 1),
-		"ai_latency_ms":     latency,
-		"ai_status":         aiStatus,
-		"active_viewers":    clientsCount,
-		"kitchen_status":    kitchenStatus,
-		"seconds_in_zone":   secondsInZone,
-		"timestamp":         time.Now().Format("15:04:05"),
+		"total_detections":     dbStats.TotalDetections,
+		"detections_today":     dbStats.DetectionsToday,
+		"stream_fps":           mathRound(fps, 1),
+		"ai_latency_ms":        latency,
+		"ai_status":            aiStatus,
+		"active_viewers":       clientsCount,
+		"kitchen_status":       kitchenStatus,
+		"seconds_in_zone":      secondsInZone,
+		"gemini_fire_alert":    geminiFireAlert,
+		"gemini_cooking_alert": geminiCookingAlert,
+		"gemini_description":   geminiDescription,
+		"timestamp":            time.Now().Format("15:04:05"),
 	}
 
 	json.NewEncoder(w).Encode(response)
@@ -320,6 +342,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldZXMax := config.ZoneXMax
 		oldZYMax := config.ZoneYMax
 		oldTriggerSecs := config.CookingTriggerSecs
+		oldGeminiAPIKey := config.GeminiAPIKey
+		oldGeminiPrompt := config.GeminiPrompt
 		currentPort := config.Port // Ambil port aktif
 		configMu.RUnlock()
 
@@ -339,7 +363,9 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			oldZYMin != newCfg.ZoneYMin ||
 			oldZXMax != newCfg.ZoneXMax ||
 			oldZYMax != newCfg.ZoneYMax ||
-			oldTriggerSecs != newCfg.CookingTriggerSecs {
+			oldTriggerSecs != newCfg.CookingTriggerSecs ||
+			oldGeminiAPIKey != newCfg.GeminiAPIKey ||
+			oldGeminiPrompt != newCfg.GeminiPrompt {
 			
 			log.Println("Mendeteksi perubahan konfigurasi. Mengatur ulang aliran CCTV...")
 			
@@ -357,6 +383,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 				newCfg.ZoneXMax,
 				newCfg.ZoneYMax,
 				newCfg.CookingTriggerSecs,
+				newCfg.GeminiAPIKey,
+				newCfg.GeminiPrompt,
 			)
 			streamProcessor.Start()
 			processorMu.Unlock()

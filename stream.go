@@ -3,12 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +60,16 @@ type StreamProcessor struct {
 	detectionsMu   sync.Mutex
 	aiBusy         bool
 	aiBusyMu       sync.Mutex
+
+	// Integrasi Gemini Hybrid AI
+	geminiAPIKey       string
+	geminiPrompt       string
+	geminiDescription  string
+	geminiFireAlert    bool
+	geminiCookingAlert bool
+	geminiLastCheck    time.Time
+	geminiBusy         bool
+	geminiBusyMu       sync.Mutex
 }
 
 // NewStreamProcessor membuat instansi baru StreamProcessor
@@ -66,6 +80,8 @@ func NewStreamProcessor(
 	confThreshold float64,
 	zxMin, zyMin, zxMax, zyMax float64,
 	cookingTriggerSecs int,
+	geminiAPIKey string,
+	geminiPrompt string,
 ) *StreamProcessor {
 	return &StreamProcessor{
 		rtspURL:            rtspURL,
@@ -77,6 +93,9 @@ func NewStreamProcessor(
 		zoneXMax:           zxMax,
 		zoneYMax:           zyMax,
 		cookingTriggerSecs: cookingTriggerSecs,
+		geminiAPIKey:       geminiAPIKey,
+		geminiPrompt:       geminiPrompt,
+		geminiDescription:  "Menunggu analisis pertama...",
 		kitchenStatus:      "Kosong",
 		clients:            make(map[chan []byte]bool),
 		stopChan:           make(chan struct{}),
@@ -286,6 +305,16 @@ func (sp *StreamProcessor) Start() {
 							}
 							sp.statusMu.Unlock()
 						}(jpegData)
+					}
+
+					// Panggil Google Gemini API kognitif secara asinkron (setiap 7 detik jika sedang tidak sibuk)
+					sp.geminiBusyMu.Lock()
+					gBusy := sp.geminiBusy
+					sp.geminiBusyMu.Unlock()
+
+					if sp.geminiAPIKey != "" && now.Sub(sp.geminiLastCheck) >= 7*time.Second && !gBusy {
+						sp.geminiLastCheck = now
+						sp.callGeminiAPI(jpegData)
 					}
 
 					// Salin deteksi terakhir untuk digambar pada frame ini
@@ -645,4 +674,201 @@ func drawText(img *image.RGBA, x, y int, text string, col color.Color, scale int
 		x += 7 * scale // Geser posisi x untuk huruf berikutnya
 	}
 }
+
+// ============================================================================
+// INTEGRASI GOOGLE GEMINI HYBRID AI (VLM)
+// ============================================================================
+
+// Struktur Request payload untuk Gemini API
+type GeminiRequest struct {
+	Contents         []GeminiContent  `json:"contents"`
+	GenerationConfig *GeminiGenConfig `json:"generationConfig,omitempty"`
+}
+
+type GeminiContent struct {
+	Parts []GeminiPart `json:"parts"`
+}
+
+type GeminiPart struct {
+	Text       string            `json:"text,omitempty"`
+	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
+}
+
+type GeminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64
+}
+
+type GeminiGenConfig struct {
+	ResponseMimeType string `json:"responseMimeType"`
+}
+
+// Struktur Response payload dari Gemini API
+type GeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+}
+
+// Hasil analisis yang diharapkan dalam format JSON
+type GeminiAnalysisResult struct {
+	Cooking     bool   `json:"cooking"`
+	Fire        bool   `json:"fire"`
+	Description string `json:"description"`
+}
+
+// callGeminiAPI mengirimkan frame JPEG ke Google Gemini API secara asinkron (background)
+func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
+	if sp.geminiAPIKey == "" {
+		return
+	}
+
+	// Set status busy
+	sp.geminiBusyMu.Lock()
+	sp.geminiBusy = true
+	sp.geminiBusyMu.Unlock()
+
+	go func() {
+		defer func() {
+			sp.geminiBusyMu.Lock()
+			sp.geminiBusy = false
+			sp.geminiBusyMu.Unlock()
+		}()
+
+		// Encode frame JPEG ke Base64
+		base64Data := base64.StdEncoding.EncodeToString(jpegData)
+
+		// Bentuk payload request sesuai format Gemini API
+		reqPayload := GeminiRequest{
+			Contents: []GeminiContent{
+				{
+					Parts: []GeminiPart{
+						{
+							Text: sp.geminiPrompt,
+						},
+						{
+							InlineData: &GeminiInlineData{
+								MimeType: "image/jpeg",
+								Data:     base64Data,
+							},
+						},
+					},
+				},
+			},
+			GenerationConfig: &GeminiGenConfig{
+				ResponseMimeType: "application/json",
+			},
+		}
+
+		// Marshal ke JSON
+		jsonBytes, err := json.Marshal(reqPayload)
+		if err != nil {
+			log.Printf("Gagal marshal request payload Gemini: %v", err)
+			return
+		}
+
+		// URL endpoint Gemini API (menggunakan Gemini 2.0 Flash)
+		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", sp.geminiAPIKey)
+
+		// Buat HTTP Request
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+		if err != nil {
+			log.Printf("Gagal membuat HTTP request Gemini: %v", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		// Eksekusi HTTP Request
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Gagal menghubungi Gemini API: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			log.Printf("Gemini API mengembalikan status error: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+			return
+		}
+
+		// Decode Response
+		var geminiResp GeminiResponse
+		if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+			log.Printf("Gagal decode response Gemini API: %v", err)
+			return
+		}
+
+		if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+			log.Printf("Gemini API tidak mengembalikan konten candidates.")
+			return
+		}
+
+		// Parsing JSON teks hasil generasi Gemini
+		rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+		var result GeminiAnalysisResult
+		if err := json.Unmarshal([]byte(rawText), &result); err != nil {
+			log.Printf("Gagal unmarshal hasil teks Gemini ke JSON: %v. Raw text: %s", err, rawText)
+			return
+		}
+
+		// Simpan hasil ke state StreamProcessor secara thread-safe
+		sp.statusMu.Lock()
+		sp.geminiDescription = result.Description
+		sp.geminiCookingAlert = result.Cooking
+		
+		// Jika terjadi transisi alarm kebakaran (sebelumnya aman sekarang terdeteksi api)
+		fireTriggered := result.Fire && !sp.geminiFireAlert
+		sp.geminiFireAlert = result.Fire
+		sp.statusMu.Unlock()
+
+		// Tangani alarm kebakaran aktif
+		if fireTriggered {
+			log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI GEMINI: %s", result.Description)
+			// Simpan bukti foto snapshot kebakaran
+			go sp.saveFireSnapshot(jpegData)
+		}
+	}()
+}
+
+// saveFireSnapshot menyimpan snapshot bukti kebakaran ke disk & log ke database SQLite
+func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte) {
+	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
+	sp.currentFrameMu.RLock()
+	processedJPEG := make([]byte, len(sp.currentFrame))
+	copy(processedJPEG, sp.currentFrame)
+	sp.currentFrameMu.RUnlock()
+
+	// Fallback jika buffer frame belum siap
+	if len(processedJPEG) == 0 {
+		processedJPEG = jpegData
+	}
+
+	// Nama file unik dengan timestamp
+	snapshotFilename := fmt.Sprintf("fire_%s.jpg", time.Now().Format("20060102_150405_000"))
+	snapshotPath := filepath.Join("snapshots", snapshotFilename)
+
+	// Pastikan folder snapshots ada
+	os.MkdirAll("snapshots", 0755)
+
+	err := os.WriteFile(snapshotPath, processedJPEG, 0644)
+	if err != nil {
+		log.Printf("Gagal menyimpan file snapshot kebakaran: %v", err)
+		return
+	}
+
+	// Catat alarm kebakaran ke database SQLite
+	_, dbErr := sp.db.LogDetection("fire", 0.99, snapshotFilename) // Default confidence 99%
+	if dbErr != nil {
+		log.Printf("Gagal mencatat log kebakaran ke SQLite: %v", dbErr)
+	} else {
+		log.Printf("DARURAT KEBAKARAN TERCATAT! Foto disimpan: %s", snapshotFilename)
+	}
+}
+
 
