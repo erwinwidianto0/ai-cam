@@ -184,6 +184,10 @@ func (sp *StreamProcessor) Start() {
 				isRTSP := strings.HasPrefix(strings.ToLower(sp.rtspURL), "rtsp://")
 				if isRTSP {
 					args = []string{
+						"-fflags", "nobuffer",       // Matikan buffering input jaringan
+						"-flags", "low_delay",       // Paksa mode delay rendah
+						"-analyzeduration", "0",     // Jangan buang waktu menganalisis format
+						"-probesize", "32",          // Ukuran probe minimal
 						"-rtsp_transport", "tcp",
 						"-i", sp.rtspURL,
 						"-r", "30", // Paksa output stabil di 30 FPS
@@ -195,6 +199,8 @@ func (sp *StreamProcessor) Start() {
 					}
 				} else {
 					args = []string{
+						"-fflags", "nobuffer",
+						"-flags", "low_delay",
 						"-re",
 						"-stream_loop", "-1",
 						"-i", sp.rtspURL,
