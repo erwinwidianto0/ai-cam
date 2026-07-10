@@ -68,13 +68,14 @@ type StreamProcessor struct {
 	geminiAPIKey        string
 	geminiPrompt        string
 	geminiDescription   string
-	geminiFireAlert     bool
-	geminiCookingAlert  bool
-	geminiSmokingAlert  bool
-	geminiSleepingAlert bool
-	geminiLastCheck     time.Time
-	geminiBusy          bool
-	geminiBusyMu        sync.Mutex
+	geminiFireAlert         bool
+	geminiCookingAlert      bool
+	geminiSmokingAlert      bool
+	geminiSleepingAlert     bool
+	geminiSOPViolationAlert bool
+	geminiLastCheck         time.Time
+	geminiBusy              bool
+	geminiBusyMu            sync.Mutex
 }
 
 // NewStreamProcessor membuat instansi baru StreamProcessor
@@ -853,11 +854,12 @@ type GeminiResponse struct {
 
 // Hasil analisis yang diharapkan dalam format JSON
 type GeminiAnalysisResult struct {
-	Cooking     bool   `json:"cooking"`
-	Fire        bool   `json:"fire"`
-	Smoking     bool   `json:"smoking"`
-	Sleeping    bool   `json:"sleeping"`
-	Description string `json:"description"`
+	Cooking      bool   `json:"cooking"`
+	Fire         bool   `json:"fire"`
+	Smoking      bool   `json:"smoking"`
+	Sleeping     bool   `json:"sleeping"`
+	SOPViolation bool   `json:"sop_violation"`
+	Description  string `json:"description"`
 }
 
 // OpenAI API request / response structs
@@ -1027,6 +1029,9 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 
 	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
 	sp.geminiSleepingAlert = result.Sleeping
+
+	sopViolationTriggered := result.SOPViolation && !sp.geminiSOPViolationAlert
+	sp.geminiSOPViolationAlert = result.SOPViolation
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
@@ -1051,6 +1056,13 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 		log.Printf("WARNING!!! DETEKSI TIDUR DARI GEMINI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "sleeping")
 		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
+
+	// Tangani alarm pelanggaran SOP/K3 aktif
+	if sopViolationTriggered {
+		log.Printf("WARNING!!! DETEKSI PELANGGARAN SOP/K3 DARI GEMINI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sop_violation")
 		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 }
@@ -1167,6 +1179,9 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 
 	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
 	sp.geminiSleepingAlert = result.Sleeping
+
+	sopViolationTriggered := result.SOPViolation && !sp.geminiSOPViolationAlert
+	sp.geminiSOPViolationAlert = result.SOPViolation
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
@@ -1190,6 +1205,13 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 		log.Printf("WARNING!!! DETEKSI TIDUR DARI OPENAI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "sleeping")
 		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
+
+	// Tangani alarm pelanggaran SOP/K3 aktif
+	if sopViolationTriggered {
+		log.Printf("WARNING!!! DETEKSI PELANGGARAN SOP/K3 DARI OPENAI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sop_violation")
 		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 }

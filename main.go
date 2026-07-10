@@ -76,7 +76,7 @@ func loadConfig() error {
 			VLMProvider:        "gemini",
 			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
-			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur, baik dalam posisi berbaring, tertelungkup dengan kepala di atas meja, atau bersandar pasif di kursi dengan mata terpejam lama layaknya terlelap (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian, analisis peringatan dini, serta identifikasi SUMBER atau ASAL objek pemicu api/asap jika terdeteksi, dalam bahasa Indonesia).",
+			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur, bersandar pasif, terlelap, atau jatuh/pingsan tergeletak (sleeping: true/false)? 5) Apakah ada pelanggaran SOP/K3 seperti tindakan mencurigakan/pencurian, barang/bahan diletakkan tidak pada tempat semestinya (berantakan/di lantai), atau risiko kontaminasi bahan makanan oleh zat kimia berbahaya (sop_violation: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), 'sop_violation' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian, analisis peringatan dini, serta identifikasi pelanggaran dalam bahasa Indonesia).",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -106,7 +106,7 @@ func loadConfig() error {
 		updated = true
 	}
 	if config.GeminiPrompt == "" {
-		config.GeminiPrompt = "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia)."
+		config.GeminiPrompt = "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur, bersandar pasif, terlelap, atau jatuh/pingsan tergeletak (sleeping: true/false)? 5) Apakah ada pelanggaran SOP/K3 seperti tindakan mencurigakan/pencurian, barang/bahan diletakkan tidak pada tempat semestinya (berantakan/di lantai), atau risiko kontaminasi bahan makanan oleh zat kimia berbahaya (sop_violation: true/false)? Kembalikan hasil dalam format JSON dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), 'sop_violation' (boolean), dan 'description' (string penjelasan analisis detail dalam bahasa Indonesia)."
 		updated = true
 	}
 
@@ -571,7 +571,9 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	geminiCookingAlert := streamProcessor.geminiCookingAlert
 	geminiSmokingAlert := streamProcessor.geminiSmokingAlert
 	geminiSleepingAlert := streamProcessor.geminiSleepingAlert
+	geminiSOPViolationAlert := streamProcessor.geminiSOPViolationAlert
 	geminiDescription := streamProcessor.geminiDescription
+	objectCount := len(streamProcessor.lastDetections)
 	processorMu.Unlock()
 
 	configMu.RLock()
@@ -584,21 +586,23 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	configMu.RUnlock()
 
 	response := map[string]interface{}{
-		"total_detections":     dbStats.TotalDetections,
-		"detections_today":     dbStats.DetectionsToday,
-		"stream_fps":           mathRound(fps, 1),
-		"ai_latency_ms":        latency,
-		"ai_status":            aiStatus,
-		"active_viewers":       clientsCount,
-		"kitchen_status":       kitchenStatus,
-		"seconds_in_zone":      secondsInZone,
-		"gemini_fire_alert":     geminiFireAlert,
-		"gemini_cooking_alert":  geminiCookingAlert,
-		"gemini_smoking_alert":  geminiSmokingAlert,
-		"gemini_sleeping_alert": geminiSleepingAlert,
-		"gemini_description":    geminiDescription,
-		"gemini_active":        geminiActive,
-		"timestamp":            time.Now().Format("15:04:05"),
+		"total_detections":           dbStats.TotalDetections,
+		"detections_today":           dbStats.DetectionsToday,
+		"stream_fps":                 mathRound(fps, 1),
+		"ai_latency_ms":              latency,
+		"ai_status":                  aiStatus,
+		"active_viewers":             clientsCount,
+		"kitchen_status":             kitchenStatus,
+		"seconds_in_zone":            secondsInZone,
+		"gemini_fire_alert":          geminiFireAlert,
+		"gemini_cooking_alert":       geminiCookingAlert,
+		"gemini_smoking_alert":       geminiSmokingAlert,
+		"gemini_sleeping_alert":      geminiSleepingAlert,
+		"gemini_sop_violation_alert": geminiSOPViolationAlert,
+		"gemini_description":         geminiDescription,
+		"gemini_active":              geminiActive,
+		"object_count":               objectCount,
+		"timestamp":                  time.Now().Format("15:04:05"),
 	}
 
 	json.NewEncoder(w).Encode(response)
