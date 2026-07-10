@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -181,6 +182,7 @@ func main() {
 	// API Pelabelan dan Pelatihan Lokal
 	http.HandleFunc("/api/label/images", handleAPILabelImages)
 	http.HandleFunc("/api/label/save", handleAPILabelSave)
+	http.HandleFunc("/api/label/upload", handleAPILabelUpload)
 	http.HandleFunc("/api/train/start", handleAPITrainStart)
 	http.HandleFunc("/api/train/status", handleAPITrainStatus)
 	http.HandleFunc("/api/train/stop", handleAPITrainStop)
@@ -945,4 +947,72 @@ func handleAPITrainStop(w http.ResponseWriter, r *http.Request) {
 	trainingActive = false
 	appendTrainingLog("\n=== PELATIHAN DIHENTIKAN OLEH PENGGUNA ===")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Pelatihan berhasil dihentikan"})
+}
+
+func handleAPILabelUpload(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Batasi ukuran request ke 32MB untuk keamanan
+	err := r.ParseMultipartForm(32 << 20)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Gagal parsing form data: " + err.Error()})
+		return
+	}
+
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		// Fallback ke single file key
+		files = r.MultipartForm.File["file"]
+	}
+
+	if len(files) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Tidak ada file yang dikirim"})
+		return
+	}
+
+	os.MkdirAll("dataset/raw", 0755)
+
+	uploadedCount := 0
+	for _, fileHeader := range files {
+		file, err := fileHeader.Open()
+		if err != nil {
+			continue
+		}
+		defer file.Close()
+
+		// Buat nama file unik menggunakan timestamp agar tidak menimpa file lama
+		ext := filepath.Ext(fileHeader.Filename)
+		cleanExt := strings.ToLower(ext)
+		if cleanExt != ".jpg" && cleanExt != ".jpeg" && cleanExt != ".png" {
+			continue // Saring hanya gambar yang valid
+		}
+
+		uniqueName := fmt.Sprintf("raw_%s_%d%s", time.Now().Format("20060102_150405"), uploadedCount, cleanExt)
+		dstPath := filepath.Join("dataset", "raw", uniqueName)
+
+		dstFile, err := os.Create(dstPath)
+		if err != nil {
+			continue
+		}
+		defer dstFile.Close()
+
+		_, err = io.Copy(dstFile, file)
+		if err == nil {
+			uploadedCount++
+		}
+		// Agar timestamp berbeda untuk iterasi berikutnya (milidetik)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "success",
+		"message":  fmt.Sprintf("Berhasil mengunggah %d gambar", uploadedCount),
+		"uploaded": uploadedCount,
+	})
 }
