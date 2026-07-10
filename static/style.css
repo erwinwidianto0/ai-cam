@@ -485,6 +485,39 @@ body {
     transform: scale(1);
 }
 
+/* Settings Sidebar Panel Specifics */
+#modal-settings {
+    background: rgba(4, 6, 10, 0.2); /* Latar belakang lebih tipis agar video terlihat jelas */
+    backdrop-filter: blur(2px); /* Blur tipis agar CCTV tetap tajam */
+    justify-content: flex-end; /* Posisikan di sebelah kanan layar */
+    align-items: stretch; /* Penuhi tinggi vertikal */
+}
+
+#modal-settings.active {
+    pointer-events: none; /* Mengizinkan klik mouse menembus backdrop ke video CCTV */
+}
+
+#modal-settings .modal-content {
+    width: 420px;
+    max-width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border-top-left-radius: 20px;
+    border-bottom-left-radius: 20px;
+    padding: 32px;
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+    transform: translateX(100%); /* Sembunyikan ke kanan luar layar */
+    transition: var(--transition-smooth);
+    pointer-events: auto; /* Aktifkan kembali tangkapan klik di dalam isi form panel */
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+#modal-settings.active .modal-content {
+    transform: translateX(0); /* Geser masuk */
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
