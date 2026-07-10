@@ -208,6 +208,10 @@
                     <label for="gemini-api-key">Gemini API Key (Google AI Studio)</label>
                     <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Masukkan Kunci API Gemini Anda">
                     <small>Dapatkan gratis di aistudio.google.com. Kosongkan untuk menonaktifkan.</small>
+                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                        <button type="button" class="btn btn-secondary" id="btn-test-gemini" style="padding: 6px 12px; font-size: 12px; height: auto; width: auto; border-radius: 6px; line-height: 1.2; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Uji Koneksi API Key</button>
+                        <span id="test-gemini-status" style="font-size: 12px; font-weight: 500;"></span>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="gemini-prompt">AI Prompt / Teks Instruksi Kustom</label>
@@ -487,6 +491,48 @@
             } catch (err) {
                 console.error("Gagal memperbarui konfigurasi: ", err);
                 alert("Gagal memperbarui konfigurasi.");
+            }
+        });
+
+        // Menguji Validitas Kunci API Gemini
+        const btnTestGemini = document.getElementById('btn-test-gemini');
+        const testGeminiStatus = document.getElementById('test-gemini-status');
+
+        btnTestGemini.addEventListener('click', async () => {
+            const apiKey = document.getElementById('gemini-api-key').value.trim();
+            if (!apiKey) {
+                testGeminiStatus.textContent = "Masukkan API Key terlebih dahulu!";
+                testGeminiStatus.style.color = "var(--color-yellow)";
+                return;
+            }
+
+            btnTestGemini.disabled = true;
+            btnTestGemini.textContent = "Menguji...";
+            testGeminiStatus.textContent = "Menghubungi Google AI Studio...";
+            testGeminiStatus.style.color = "var(--text-secondary)";
+
+            try {
+                const response = await fetch('/api/settings/test-gemini', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gemini_api_key: apiKey })
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    testGeminiStatus.textContent = "✓ API Key Valid & Koneksi Sukses!";
+                    testGeminiStatus.style.color = "var(--color-green)";
+                } else {
+                    testGeminiStatus.textContent = "✗ " + (result.message || "Gagal terhubung.");
+                    testGeminiStatus.style.color = "var(--color-red)";
+                }
+            } catch (err) {
+                console.error("Gagal menguji Gemini API Key: ", err);
+                testGeminiStatus.textContent = "✗ Kesalahan koneksi lokal.";
+                testGeminiStatus.style.color = "var(--color-red)";
+            } finally {
+                btnTestGemini.disabled = false;
+                btnTestGemini.textContent = "Uji Koneksi API Key";
             }
         });
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -162,6 +163,7 @@ func main() {
 	http.HandleFunc("/api/events", handleAPIEvents)
 	http.HandleFunc("/api/stats", handleAPIStats)
 	http.HandleFunc("/api/settings", handleAPISettings)
+	http.HandleFunc("/api/settings/test-gemini", handleAPITestGemini)
 
 	// Endpoint menyajikan file gambar snapshot
 	http.Handle("/snapshots/", http.StripPrefix("/snapshots/", http.FileServer(http.Dir("./snapshots"))))
@@ -397,4 +399,78 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, `{"error": "Method not allowed"}`, http.StatusMethodNotAllowed)
+}
+
+// handleAPITestGemini memvalidasi API Key Gemini ke Google secara langsung dengan query teks ringan
+func handleAPITestGemini(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"status": "error", "message": "Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		GeminiAPIKey string `json:"gemini_api_key"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&reqBody)
+	if err != nil || reqBody.GeminiAPIKey == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "API Key tidak boleh kosong"})
+		return
+	}
+
+	// Payload request ringan hanya kirim teks pendek untuk verifikasi validitas key
+	testPayload := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{
+						"text": "Hello, is this API Key valid? Reply with YES.",
+					},
+				},
+			},
+		},
+	}
+
+	jsonBytes, err := json.Marshal(testPayload)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal menyusun payload: %v", err)})
+		return
+	}
+
+	// Panggil Gemini API Endpoint
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=%s", reqBody.GeminiAPIKey)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal inisialisasi request HTTP: %v", err)})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-goog-api-key", reqBody.GeminiAPIKey) // Header penting untuk token API bertipe tertentu
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		w.WriteHeader(http.StatusOK) // Kembalikan HTTP 200 agar ditangkap frontend secara ramah
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal terhubung ke Google API (%v)", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("Kunci API tidak valid (Status HTTP %d)", resp.StatusCode),
+		})
+		return
+	}
+
+	// Jika status 200 OK, berarti kunci API valid!
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Koneksi sukses! API Key Valid.",
+	})
 }

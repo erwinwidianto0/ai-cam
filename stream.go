@@ -775,8 +775,8 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 			return
 		}
 
-		// URL endpoint Gemini API (menggunakan Gemini 2.0 Flash)
-		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", sp.geminiAPIKey)
+		// URL endpoint Gemini API (menggunakan model gemini-flash-latest)
+		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=%s", sp.geminiAPIKey)
 
 		// Buat HTTP Request
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
@@ -788,6 +788,7 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-goog-api-key", sp.geminiAPIKey) // Header penting untuk token API bertipe tertentu
 
 		// Eksekusi HTTP Request
 		client := &http.Client{Timeout: 15 * time.Second}
