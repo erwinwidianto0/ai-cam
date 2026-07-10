@@ -73,6 +73,9 @@ type StreamProcessor struct {
 	geminiSmokingAlert      bool
 	geminiSleepingAlert     bool
 	geminiSOPViolationAlert bool
+	geminiSmokingCount      int
+	geminiSleepingCount     int
+	geminiSOPViolationCount int
 	geminiLastCheck         time.Time
 	geminiBusy              bool
 	geminiBusyMu            sync.Mutex
@@ -343,11 +346,29 @@ func (sp *StreamProcessor) Start() {
 						}(jpegData)
 					}
 
-					// Jika ada alarm aktif (kebakaran, merokok, tidur) atau aktivitas memasak sedang berjalan, 
+					// Salin deteksi terakhir untuk digambar pada frame ini
+					sp.detectionsMu.Lock()
+					var detections []AIDetection
+					if sp.lastDetections != nil {
+						detections = make([]AIDetection, len(sp.lastDetections))
+						copy(detections, sp.lastDetections)
+					}
+					sp.detectionsMu.Unlock()
+
+					// Jika ada alarm aktif (kebakaran, merokok, tidur, pelanggaran SOP) atau aktivitas memasak sedang berjalan, 
 					// lakukan pemantauan berkala ke VLM setiap 20 detik agar alarm bisa mati secara otomatis jika kondisi sudah kembali aman.
 					sp.statusMu.Lock()
-					hasActiveAlert := sp.geminiFireAlert || sp.geminiSmokingAlert || sp.geminiSleepingAlert || sp.isCooking
+					hasActiveAlert := sp.geminiFireAlert || sp.geminiSmokingAlert || sp.geminiSleepingAlert || sp.geminiSOPViolationAlert || sp.isCooking
 					sp.statusMu.Unlock()
+
+					// Cari apakah ada manusia terdeteksi secara lokal oleh YOLO
+					localPersonDetected := false
+					for _, d := range detections {
+						if d.Label == "person" && d.Confidence >= sp.confThreshold {
+							localPersonDetected = true
+							break
+						}
+					}
 
 					sp.geminiBusyMu.Lock()
 					gBusy := sp.geminiBusy
@@ -360,18 +381,20 @@ func (sp *StreamProcessor) Start() {
 						hasAPIKey = (sp.geminiAPIKey != "")
 					}
 
-					if hasAPIKey && hasActiveAlert && !gBusy && time.Since(sp.geminiLastCheck) >= 20*time.Second {
+					// Pemicu VLM periodik:
+					// 1. Jika ada alarm aktif: cek setiap 20 detik untuk melihat apakah kondisi sudah aman kembali.
+					// 2. Jika tidak ada alarm aktif, tetapi ada orang (person) di area kerja: cek setiap 60 detik (1 menit) untuk mendeteksi rokok/tidur/pelanggaran secara otomatis.
+					shouldCheckVLM := false
+					if hasActiveAlert {
+						shouldCheckVLM = time.Since(sp.geminiLastCheck) >= 20*time.Second
+					} else if localPersonDetected {
+						shouldCheckVLM = time.Since(sp.geminiLastCheck) >= 60*time.Second
+					}
+
+					if hasAPIKey && shouldCheckVLM && !gBusy {
 						sp.geminiLastCheck = time.Now()
 						go sp.callVLMAPI(jpegData)
 					}
-					// Salin deteksi terakhir untuk digambar pada frame ini
-					sp.detectionsMu.Lock()
-					var detections []AIDetection
-					if sp.lastDetections != nil {
-						detections = make([]AIDetection, len(sp.lastDetections))
-						copy(detections, sp.lastDetections)
-					}
-					sp.detectionsMu.Unlock()
 
 					// Proses logika deteksi ROI dapur & penggambaran bounding box
 					processedJPEG, _, _ := sp.drawBoundingBoxes(jpegData, detections)
@@ -1019,19 +1042,49 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 	sp.geminiDescription = result.Description
 	sp.geminiCookingAlert = result.Cooking
 	
-	// Jika terjadi transisi alarm kebakaran (sebelumnya aman sekarang terdeteksi api)
+	// Jika terjadi transisi alarm kebakaran
 	fireTriggered := result.Fire && !sp.geminiFireAlert
 	sp.geminiFireAlert = result.Fire
-
-	// Simpan status merokok dan tidur
-	smokingTriggered := result.Smoking && !sp.geminiSmokingAlert
-	sp.geminiSmokingAlert = result.Smoking
-
-	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
-	sp.geminiSleepingAlert = result.Sleeping
-
-	sopViolationTriggered := result.SOPViolation && !sp.geminiSOPViolationAlert
-	sp.geminiSOPViolationAlert = result.SOPViolation
+ 
+	// Filter 2x berurutan untuk rokok, tidur, dan SOP pelanggaran agar tidak terlalu sensitif/spam
+	if result.Smoking {
+		sp.geminiSmokingCount++
+	} else {
+		sp.geminiSmokingCount = 0
+	}
+	smokingTriggered := false
+	if sp.geminiSmokingCount >= 2 && !sp.geminiSmokingAlert {
+		smokingTriggered = true
+		sp.geminiSmokingAlert = true
+	} else if sp.geminiSmokingCount == 0 && sp.geminiSmokingAlert {
+		sp.geminiSmokingAlert = false
+	}
+ 
+	if result.Sleeping {
+		sp.geminiSleepingCount++
+	} else {
+		sp.geminiSleepingCount = 0
+	}
+	sleepingTriggered := false
+	if sp.geminiSleepingCount >= 2 && !sp.geminiSleepingAlert {
+		sleepingTriggered = true
+		sp.geminiSleepingAlert = true
+	} else if sp.geminiSleepingCount == 0 && sp.geminiSleepingAlert {
+		sp.geminiSleepingAlert = false
+	}
+ 
+	if result.SOPViolation {
+		sp.geminiSOPViolationCount++
+	} else {
+		sp.geminiSOPViolationCount = 0
+	}
+	sopViolationTriggered := false
+	if sp.geminiSOPViolationCount >= 2 && !sp.geminiSOPViolationAlert {
+		sopViolationTriggered = true
+		sp.geminiSOPViolationAlert = true
+	} else if sp.geminiSOPViolationCount == 0 && sp.geminiSOPViolationAlert {
+		sp.geminiSOPViolationAlert = false
+	}
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
@@ -1172,16 +1225,46 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 	// Jika terjadi transisi alarm kebakaran
 	fireTriggered := result.Fire && !sp.geminiFireAlert
 	sp.geminiFireAlert = result.Fire
-
-	// Simpan status merokok dan tidur
-	smokingTriggered := result.Smoking && !sp.geminiSmokingAlert
-	sp.geminiSmokingAlert = result.Smoking
-
-	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
-	sp.geminiSleepingAlert = result.Sleeping
-
-	sopViolationTriggered := result.SOPViolation && !sp.geminiSOPViolationAlert
-	sp.geminiSOPViolationAlert = result.SOPViolation
+ 
+	// Filter 2x berurutan untuk rokok, tidur, dan SOP pelanggaran agar tidak terlalu sensitif/spam
+	if result.Smoking {
+		sp.geminiSmokingCount++
+	} else {
+		sp.geminiSmokingCount = 0
+	}
+	smokingTriggered := false
+	if sp.geminiSmokingCount >= 2 && !sp.geminiSmokingAlert {
+		smokingTriggered = true
+		sp.geminiSmokingAlert = true
+	} else if sp.geminiSmokingCount == 0 && sp.geminiSmokingAlert {
+		sp.geminiSmokingAlert = false
+	}
+ 
+	if result.Sleeping {
+		sp.geminiSleepingCount++
+	} else {
+		sp.geminiSleepingCount = 0
+	}
+	sleepingTriggered := false
+	if sp.geminiSleepingCount >= 2 && !sp.geminiSleepingAlert {
+		sleepingTriggered = true
+		sp.geminiSleepingAlert = true
+	} else if sp.geminiSleepingCount == 0 && sp.geminiSleepingAlert {
+		sp.geminiSleepingAlert = false
+	}
+ 
+	if result.SOPViolation {
+		sp.geminiSOPViolationCount++
+	} else {
+		sp.geminiSOPViolationCount = 0
+	}
+	sopViolationTriggered := false
+	if sp.geminiSOPViolationCount >= 2 && !sp.geminiSOPViolationAlert {
+		sopViolationTriggered = true
+		sp.geminiSOPViolationAlert = true
+	} else if sp.geminiSOPViolationCount == 0 && sp.geminiSOPViolationAlert {
+		sp.geminiSOPViolationAlert = false
+	}
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
