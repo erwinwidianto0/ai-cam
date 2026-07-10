@@ -383,7 +383,10 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 
 	// Proses setiap objek terdeteksi
 	for _, det := range detections {
-		isPerson := det.Label == "person"
+		// Kita hanya memproses objek manusia ("person")
+		if det.Label != "person" {
+			continue
+		}
 		
 		if det.Confidence < sp.confThreshold {
 			continue
@@ -399,40 +402,12 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		if x2 >= bounds.Max.X { x2 = bounds.Max.X - 1 }
 		if y2 >= bounds.Max.Y { y2 = bounds.Max.Y - 1 }
 
-		// Pilih warna berdasarkan jenis objek
-		var boxColor color.Color = colorYellow
-		if isPerson {
-			boxColor = colorRed
-
-			// LOGIKA DETEKSI ZONA MEMASAK (ROI):
-			// Kita ambil posisi kaki orang tersebut (tengah bawah dari bounding box):
-			// px = (x1 + x2) / 2
-			// py = y2
-			px := (x1 + x2) / 2
-			py := y2
-
-			// Normalisasikan koordinat absolut menjadi koordinat rasio persen (0.0 - 1.0)
-			normX := float64(px) / width
-			normY := float64(py) / height
-
-			// Cek apakah koordinat kaki masuk ke dalam area Zona ROI
-			if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
-				personInZone = true
-				if det.Confidence > maxConf {
-					maxConf = det.Confidence
-				}
-			}
-		}
-
-		// Gambar kotak pembatas objek
-		drawBox(rgbaImg, x1, y1, x2, y2, boxColor, 3)
+		// Gambar kotak pembatas objek orang (merah)
+		drawBox(rgbaImg, x1, y1, x2, y2, colorRed, 3)
 
 		// Gambar label teks "Manusia [Akurasi]%" di atas kotak merah
-		labelText := "Manusia"
-		if isPerson {
-			confPercent := int(det.Confidence * 100)
-			labelText = fmt.Sprintf("Manusia %d%%", confPercent)
-		}
+		confPercent := int(det.Confidence * 100)
+		labelText := fmt.Sprintf("Manusia %d%%", confPercent)
 
 		fontScale := 1
 		if height > 500 {
@@ -447,8 +422,25 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		}
 
 		labelWidth := len(labelText) * charStep
-		drawFilledRect(rgbaImg, x1, labelY, x1+labelWidth, labelY+labelHeight+2, boxColor)
+		drawFilledRect(rgbaImg, x1, labelY, x1+labelWidth, labelY+labelHeight+2, colorRed)
 		drawText(rgbaImg, x1+3, labelY+2, labelText, color.White, fontScale)
+
+		// LOGIKA DETEKSI ZONA MEMASAK (ROI):
+		// Kita ambil posisi kaki orang tersebut (tengah bawah dari bounding box):
+		px := (x1 + x2) / 2
+		py := y2
+
+		// Normalisasikan koordinat absolut menjadi koordinat rasio persen (0.0 - 1.0)
+		normX := float64(px) / width
+		normY := float64(py) / height
+
+		// Cek apakah koordinat kaki masuk ke dalam area Zona ROI
+		if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
+			personInZone = true
+			if det.Confidence > maxConf {
+				maxConf = det.Confidence
+			}
+		}
 	}
 
 	// STATE MACHINE DETEKSI MEMASAK

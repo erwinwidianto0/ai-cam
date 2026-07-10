@@ -38,6 +38,11 @@ async def detect(file: bytes = File(...)):
             for box in boxes:
                 cls_id = int(box.cls[0])
                 label = model.names[cls_id]
+                
+                # Saring hanya objek manusia ("person") yang diproses
+                if label != "person":
+                    continue
+                    
                 confidence = float(box.conf[0])
                 # Koordinat bounding box x1, y1, x2, y2
                 x1, y1, x2, y2 = map(float, box.xyxy[0])
