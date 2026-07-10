@@ -1034,18 +1034,24 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 		log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI GEMINI: %s", result.Description)
 		// Simpan bukti foto snapshot kebakaran
 		go sp.saveFireSnapshot(jpegData, nil)
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 
 	// Tangani alarm merokok aktif
 	if smokingTriggered {
 		log.Printf("WARNING!!! DETEKSI MEROKOK DARI GEMINI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "smoking")
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 
 	// Tangani alarm tidur aktif
 	if sleepingTriggered {
 		log.Printf("WARNING!!! DETEKSI TIDUR DARI GEMINI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "sleeping")
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 }
 
@@ -1167,18 +1173,24 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 	if fireTriggered {
 		log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI OPENAI: %s", result.Description)
 		go sp.saveFireSnapshot(jpegData, nil)
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 
 	// Tangani alarm merokok aktif
 	if smokingTriggered {
 		log.Printf("WARNING!!! DETEKSI MEROKOK DARI OPENAI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "smoking")
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 
 	// Tangani alarm tidur aktif
 	if sleepingTriggered {
 		log.Printf("WARNING!!! DETEKSI TIDUR DARI OPENAI: %s", result.Description)
 		go sp.saveEventSnapshot(jpegData, "sleeping")
+		// Rekam otomatis foto bersih & koordinat kotak pembatas dari Guru VLM untuk melatih Murid YOLO
+		go sp.recordAlarmToTrainingDataset(jpegData)
 	}
 }
 
@@ -1370,6 +1382,38 @@ func (sp *StreamProcessor) saveToTrainingDataset(cleanJPEG []byte, detections []
 	}
 
 	log.Printf("[Auto-Dataset] DATASET BERTAMBAH OTOMATIS! Gambar & label tersimpan: %s", baseName)
+}
+
+// recordAlarmToTrainingDataset secara asinkron memanggil auto-label VLM untuk mendeteksi koordinat objek pada frame alarm,
+// lalu menyimpannya langsung ke dataset pelatihan YOLO agar murid YOLO bisa belajar dari guru VLM.
+func (sp *StreamProcessor) recordAlarmToTrainingDataset(jpegData []byte) {
+	// Dapatkan API Key dan Provider secara thread-safe
+	sp.statusMu.Lock()
+	vlmProvider := sp.vlmProvider
+	openaiAPIKey := sp.openaiAPIKey
+	geminiAPIKey := sp.geminiAPIKey
+	sp.statusMu.Unlock()
+
+	var detections []AIDetection
+	var err error
+
+	// Panggil VLM untuk melokalisasi koordinat kotak pembatas (auto-labeling)
+	if vlmProvider == "openai" && openaiAPIKey != "" {
+		detections, err = detectObjectsWithOpenAI(jpegData, openaiAPIKey)
+	} else if geminiAPIKey != "" {
+		detections, err = detectObjectsWithGemini(jpegData, geminiAPIKey)
+	}
+
+	if err != nil {
+		log.Printf("[Auto-Learning] Gagal auto-labeling untuk perekaman otomatis dataset alarm: %v", err)
+		return
+	}
+
+	if len(detections) > 0 {
+		// Simpan gambar bersih dan file label .txt standar YOLO ke folder latihan
+		sp.saveToTrainingDataset(jpegData, detections)
+		log.Printf("[Auto-Learning] Pembelajaran Mandiri: Berhasil merekam %d objek dari Guru VLM ke dataset training YOLO!", len(detections))
+	}
 }
 
 
