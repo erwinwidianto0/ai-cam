@@ -9,9 +9,11 @@ import os
 
 app = FastAPI(title="YOLOv8 Inference Service", description="Local AI service for CCTV object detection")
 
+from transformers import AutoProcessor, AutoModelForCausalLM
+import torch
 from huggingface_hub import hf_hub_download
 
-# Memuat model secara Hybrid (Base Model COCO + Custom Model + Fire/Smoke Model)
+# Memuat model secara Hybrid (Base Model COCO + Custom Model + Fire/Smoke Model + Florence-2 VLM)
 try:
     print("Loading YOLO26 base model...")
     model_person = YOLO("yolo26n.pt")
@@ -29,6 +31,13 @@ try:
     fire_ckpt = hf_hub_download(repo_id="rabahdev/fire-smoke-yolov8n", filename="best.pt")
     model_fire = YOLO(fire_ckpt)
     print("YOLOv8 fire/smoke model loaded successfully.")
+    
+    print("Loading Florence-2 local VLM model from Microsoft...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    florence_model_id = "microsoft/Florence-2-base"
+    florence_model = AutoModelForCausalLM.from_pretrained(florence_model_id, trust_remote_code=True).eval().to(device)
+    florence_processor = AutoProcessor.from_pretrained(florence_model_id, trust_remote_code=True)
+    print(f"Florence-2 local VLM loaded successfully on device: {device}")
 except Exception as e:
     print(f"Error loading models: {e}")
     sys.exit(1)
@@ -190,6 +199,82 @@ async def detect(file: bytes = File(...)):
         
     except Exception as e:
         print(f"Error processing frame: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Helper untuk memproses tugas VLM menggunakan Microsoft Florence-2 secara lokal
+def run_florence_task(image, task_prompt, text_input=None):
+    if text_input:
+        prompt = task_prompt + text_input
+    else:
+        prompt = task_prompt
+        
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    inputs = florence_processor(text=prompt, images=image, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    
+    with torch.no_grad():
+        generated_ids = florence_model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=512,
+            num_beams=3
+        )
+        
+    generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    parsed_answer = florence_processor.post_process_generation(
+        generated_text, 
+        task=task_prompt, 
+        image_size=(image.width, image.height)
+    )
+    return parsed_answer
+
+@app.post("/vlm/local")
+async def vlm_local(file: bytes = File(...)):
+    try:
+        # Baca gambar dari byte raw JPEG
+        image = Image.open(io.BytesIO(file))
+        
+        # 1. Dapatkan Deskripsi Detail (Detailed Caption)
+        caption_result = run_florence_task(image, "<MORE_DETAILED_CAPTION>")
+        description = caption_result.get("<MORE_DETAILED_CAPTION>", "No description available.")
+        
+        # 2. Dapatkan deteksi objek kognitif (Phrase Grounding) untuk alarm
+        grounding_result = run_florence_task(
+            image, 
+            "<CAPTION_TO_PHRASE_GROUNDING>", 
+            "fire, smoke, person smoking, cigarette, person sleeping, person lying down, mess on floor, items on floor"
+        )
+        
+        parsed_grounding = grounding_result.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
+        labels = parsed_grounding.get("labels", [])
+        
+        # Analisis label secara logis (ubah ke lowercase)
+        labels_lower = [l.lower() for l in labels]
+        
+        fire_detected = any("fire" in l or "api" in l or "flame" in l for l in labels_lower)
+        smoke_detected = any("smoke" in l or "asap" in l for l in labels_lower)
+        smoking_detected = any("smoking" in l or "cigarette" in l or "rokok" in l for l in labels_lower)
+        sleeping_detected = any("sleeping" in l or "lying down" in l or "tidur" in l for l in labels_lower)
+        sop_violation_detected = any("mess" in l or "floor" in l or "trash" in l for l in labels_lower)
+        
+        # 3. Evaluasi Memasak secara kognitif:
+        # Deteksi jika ada manusia yang berinteraksi dekat dengan kompor (stove / kitchen cabinet)
+        cooking_grounding = run_florence_task(image, "<CAPTION_TO_PHRASE_GROUNDING>", "person, stove, kitchen cabinet")
+        cooking_labels = [l.lower() for l in cooking_grounding.get("<CAPTION_TO_PHRASE_GROUNDING>", {}).get("labels", [])]
+        
+        cooking_detected = "person" in cooking_labels and ("stove" in cooking_labels or "kitchen cabinet" in cooking_labels)
+
+        return JSONResponse(content={
+            "cooking": cooking_detected,
+            "fire": fire_detected or smoke_detected,
+            "smoking": smoking_detected,
+            "sleeping": sleeping_detected,
+            "sop_violation": sop_violation_detected,
+            "description": description
+        })
+        
+    except Exception as e:
+        print(f"Error processing local VLM task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

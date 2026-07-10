@@ -594,6 +594,8 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	geminiActive := false
 	if config.VLMProvider == "openai" {
 		geminiActive = (config.OpenAIAPIKey != "")
+	} else if config.VLMProvider == "local" {
+		geminiActive = true // VLM lokal Florence-2 aktif secara mandiri
 	} else {
 		geminiActive = (config.GeminiAPIKey != "")
 	}

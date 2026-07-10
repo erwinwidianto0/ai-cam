@@ -4,3 +4,8 @@ ultralytics
 pillow
 python-multipart
 huggingface_hub
+torch
+torchvision
+transformers
+einops
+timm

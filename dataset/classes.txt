@@ -1,3 +1,5 @@
 manusia
 meja
 mobil
+api
+asap

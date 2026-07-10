@@ -492,6 +492,7 @@
                     <select id="vlm-provider" name="vlm_provider" onchange="toggleVLMSettings(this.value)">
                         <option value="gemini">Google Gemini (Model: gemini-2.5-flash)</option>
                         <option value="openai">OpenAI (Model: gpt-4o-mini)</option>
+                        <option value="local">Florence-2 (Lokal & Offline)</option>
                     </select>
                 </div>
 
@@ -951,6 +952,9 @@
             if (val === 'openai') {
                 geminiGroup.style.display = 'none';
                 openaiGroup.style.display = 'block';
+            } else if (val === 'local') {
+                geminiGroup.style.display = 'none';
+                openaiGroup.style.display = 'none';
             } else {
                 geminiGroup.style.display = 'block';
                 openaiGroup.style.display = 'none';

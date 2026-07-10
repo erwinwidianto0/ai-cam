@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1364,7 +1365,7 @@ type OpenAIMsgContent struct {
 	Content string `json:"content"`
 }
 
-// callVLMAPI mengoordinasikan pemanggilan VLM secara asinkron berdasarkan provider aktif (Gemini atau OpenAI)
+// callVLMAPI mengoordinasikan pemanggilan VLM secara asinkron berdasarkan provider aktif (Gemini, OpenAI, atau Local)
 func (sp *StreamProcessor) callVLMAPI(jpegData []byte) {
 	sp.geminiBusyMu.Lock()
 	sp.geminiBusy = true
@@ -1377,12 +1378,149 @@ func (sp *StreamProcessor) callVLMAPI(jpegData []byte) {
 			sp.geminiBusyMu.Unlock()
 		}()
 
-		if sp.vlmProvider == "openai" {
+		if sp.vlmProvider == "local" {
+			sp.executeLocalVLM(jpegData)
+		} else if sp.vlmProvider == "openai" {
 			sp.executeOpenAIAPI(jpegData)
 		} else {
 			sp.executeGeminiAPI(jpegData)
 		}
 	}()
+}
+
+// executeLocalVLM mengirimkan frame JPEG ke model Florence-2 lokal secara sinkron (di dalam goroutine)
+func (sp *StreamProcessor) executeLocalVLM(jpegData []byte) {
+	// Buat request HTTP multipart untuk mengirim byte gambar
+	var requestBody bytes.Buffer
+	writer := multipart.NewWriter(&requestBody)
+
+	part, err := writer.CreateFormFile("file", "frame.jpg")
+	if err != nil {
+		log.Printf("Gagal membuat multipart form: %v", err)
+		return
+	}
+	_, err = part.Write(jpegData)
+	if err != nil {
+		log.Printf("Gagal menulis gambar ke multipart: %v", err)
+		return
+	}
+	err = writer.Close()
+	if err != nil {
+		log.Printf("Gagal menutup multipart writer: %v", err)
+		return
+	}
+
+	// Buat HTTP request ke endpoint Python VLM lokal
+	url := fmt.Sprintf("%s/vlm/local", sp.aiClient.Endpoint)
+	req, err := http.NewRequest("POST", url, &requestBody)
+	if err != nil {
+		log.Printf("Gagal membuat request HTTP VLM Lokal: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Jalankan request HTTP dengan timeout 25 detik
+	client := &http.Client{Timeout: 25 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Gagal menghubungi layanan VLM Lokal: %v", err)
+		sp.statusMu.Lock()
+		sp.geminiDescription = fmt.Sprintf("Error: Gagal menghubungi VLM Lokal (%v)", err)
+		sp.statusMu.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		log.Printf("VLM Lokal mengembalikan status error: %d, Response: %s", resp.StatusCode, string(bodyBytes))
+		sp.statusMu.Lock()
+		sp.geminiDescription = fmt.Sprintf("Error: VLM Lokal error status %d", resp.StatusCode)
+		sp.statusMu.Unlock()
+		return
+	}
+
+	// Decode response
+	var result GeminiAnalysisResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("Gagal decode response VLM Lokal: %v", err)
+		return
+	}
+
+	// Simpan hasil ke state StreamProcessor secara thread-safe
+	sp.statusMu.Lock()
+	sp.geminiDescription = result.Description
+	sp.geminiCookingAlert = result.Cooking
+	
+	// Jika terjadi transisi alarm kebakaran
+	fireTriggered := result.Fire && !sp.geminiFireAlert
+	sp.geminiFireAlert = result.Fire
+ 
+	// Filter 2x berurutan untuk rokok, tidur, dan SOP pelanggaran agar tidak terlalu sensitif/spam
+	if result.Smoking {
+		sp.geminiSmokingCount++
+	} else {
+		sp.geminiSmokingCount = 0
+	}
+	smokingTriggered := false
+	if sp.geminiSmokingCount >= 2 && !sp.geminiSmokingAlert {
+		smokingTriggered = true
+		sp.geminiSmokingAlert = true
+	} else if sp.geminiSmokingCount == 0 && sp.geminiSmokingAlert {
+		sp.geminiSmokingAlert = false
+	}
+ 
+	if result.Sleeping {
+		sp.geminiSleepingCount++
+	} else {
+		sp.geminiSleepingCount = 0
+	}
+	sleepingTriggered := false
+	if sp.geminiSleepingCount >= 2 && !sp.geminiSleepingAlert {
+		sleepingTriggered = true
+		sp.geminiSleepingAlert = true
+	} else if sp.geminiSleepingCount == 0 && sp.geminiSleepingAlert {
+		sp.geminiSleepingAlert = false
+	}
+ 
+	if result.SOPViolation {
+		sp.geminiSOPViolationCount++
+	} else {
+		sp.geminiSOPViolationCount = 0
+	}
+	sopViolationTriggered := false
+	if sp.geminiSOPViolationCount >= 2 && !sp.geminiSOPViolationAlert {
+		sopViolationTriggered = true
+		sp.geminiSOPViolationAlert = true
+	} else if sp.geminiSOPViolationCount == 0 && sp.geminiSOPViolationAlert {
+		sp.geminiSOPViolationAlert = false
+	}
+	sp.statusMu.Unlock()
+
+	// Tangani alarm aktif untuk snapshot & dataset kustom
+	if fireTriggered {
+		log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI VLM LOKAL: %s", result.Description)
+		go sp.saveFireSnapshot(jpegData, nil)
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
+
+	if smokingTriggered {
+		log.Printf("WARNING!!! DETEKSI MEROKOK DARI VLM LOKAL: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "smoking")
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
+
+	if sleepingTriggered {
+		log.Printf("WARNING!!! DETEKSI TIDUR DARI VLM LOKAL: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sleeping")
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
+
+	if sopViolationTriggered {
+		log.Printf("WARNING!!! PELANGGARAN SOP DARI VLM LOKAL: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sop_violation")
+		go sp.recordAlarmToTrainingDataset(jpegData)
+	}
 }
 
 // executeGeminiAPI mengirimkan frame JPEG ke Google Gemini API secara sinkron (di dalam goroutine)

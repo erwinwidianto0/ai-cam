@@ -1,5 +1,5 @@
 path: ./dataset
 train: images/train
 val: images/train
-nc: 3
-names: ['manusia', 'meja', 'mobil']
+nc: 5
+names: ['manusia', 'meja', 'mobil', 'api', 'asap']
