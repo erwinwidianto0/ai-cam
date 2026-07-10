@@ -581,6 +581,13 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	geminiSOPViolationAlert := streamProcessor.geminiSOPViolationAlert
 	geminiDescription := streamProcessor.geminiDescription
 	objectCount := len(streamProcessor.lastDetections)
+	
+	// Salin data deteksi secara aman untuk dikirim ke klien dashboard
+	var lastDetections []AIDetection
+	if streamProcessor.lastDetections != nil {
+		lastDetections = make([]AIDetection, len(streamProcessor.lastDetections))
+		copy(lastDetections, streamProcessor.lastDetections)
+	}
 	processorMu.Unlock()
 
 	configMu.RLock()
@@ -609,6 +616,7 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		"gemini_description":         geminiDescription,
 		"gemini_active":              geminiActive,
 		"object_count":               objectCount,
+		"detections":                 lastDetections,
 		"timestamp":                  time.Now().Format("15:04:05"),
 	}
 
