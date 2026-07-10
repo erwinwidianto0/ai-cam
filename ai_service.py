@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from PIL import Image
 from ultralytics import YOLO
 import sys
+import os
 
 app = FastAPI(title="YOLOv8 Inference Service", description="Local AI service for CCTV object detection")
 
