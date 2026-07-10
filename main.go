@@ -205,6 +205,7 @@ func main() {
 	http.HandleFunc("/api/settings", handleAPISettings)
 	http.HandleFunc("/api/settings/test-gemini", handleAPITestGemini)
 	http.HandleFunc("/api/settings/test-openai", handleAPITestOpenAI)
+	http.HandleFunc("/api/vlm/trigger", handleAPIVLMTrigger)
 
 	// API Pelabelan dan Pelatihan Lokal
 	http.HandleFunc("/api/label/images", handleAPILabelImages)
@@ -1531,4 +1532,52 @@ Contoh format JSON yang diharapkan:
 	}
 
 	return detections, nil
+}
+
+// handleAPIVLMTrigger memicu pemanggilan VLM secara manual dari halaman web dashboard
+func handleAPIVLMTrigger(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"status": "error", "message": "Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	processorMu.Lock()
+	if streamProcessor == nil {
+		processorMu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Streaming processor belum siap"})
+		return
+	}
+	sp := streamProcessor
+	processorMu.Unlock()
+
+	// Ambil frame JPEG terkini
+	sp.currentFrameMu.RLock()
+	rawJPEG := make([]byte, len(sp.currentFrame))
+	copy(rawJPEG, sp.currentFrame)
+	sp.currentFrameMu.RUnlock()
+
+	if len(rawJPEG) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Frame kamera belum tersedia"})
+		return
+	}
+
+	// Pemicu pemanggilan API kognitif secara manual
+	sp.geminiBusyMu.Lock()
+	gBusy := sp.geminiBusy
+	sp.geminiBusyMu.Unlock()
+
+	if gBusy {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "AI sedang sibuk memproses analisis"})
+		return
+	}
+
+	// Panggil VLM secara asinkron
+	sp.geminiLastCheck = time.Now()
+	go sp.callVLMAPI(rawJPEG)
+
+	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Kueri VLM berhasil dipicu secara manual"})
 }

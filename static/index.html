@@ -93,9 +93,15 @@
                         <div class="gemini-logo-icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C12 2 12 7 9 10C6 13 2 12 2 12C2 12 7 12 10 15C13 18 12 22 12 22C12 22 12 17 15 14C18 11 22 12 22 12C22 12 17 12 14 9C11 6 12 2 12 2Z" fill="url(#gemini-grad)"/><defs><linearGradient id="gemini-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse"><stop stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs></svg>
                         </div>
-                        <h2>Analisis Kognitif AI (Google Gemini VLM)</h2>
+                        <h2>Analisis Kognitif AI (Cloud VLM)</h2>
                     </div>
-                    <span class="header-action-badge alert-idle" id="gemini-active-badge">CLOUD OFFLINE</span>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button type="button" class="btn btn-secondary" id="btn-trigger-vlm" style="padding: 4px 10px; font-size: 11px; height: auto; width: auto; border-radius: 6px; line-height: 1.2; display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                            Tanya AI
+                        </button>
+                        <span class="header-action-badge alert-idle" id="gemini-active-badge">CLOUD OFFLINE</span>
+                    </div>
                 </div>
                 <div class="gemini-content-text" id="gemini-description-text">
                     Menunggu analisis kognitif pertama dari Google Gemini API. Pastikan Anda telah memasukkan Gemini API Key di menu pengaturan.
@@ -765,6 +771,32 @@
                 openaiGroup.style.display = 'none';
             }
         };
+
+        // Mengirimkan kueri manual Tanya AI (VLM)
+        const btnTriggerVLM = document.getElementById('btn-trigger-vlm');
+        btnTriggerVLM.addEventListener('click', async () => {
+            btnTriggerVLM.disabled = true;
+            btnTriggerVLM.textContent = "Berpikir...";
+            try {
+                const response = await fetch('/api/vlm/trigger', { method: 'POST' });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    btnTriggerVLM.textContent = "✓ Selesai";
+                    setTimeout(() => {
+                        btnTriggerVLM.disabled = false;
+                        btnTriggerVLM.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Tanya AI`;
+                    }, 2000);
+                } else {
+                    alert("Error: " + result.message);
+                    btnTriggerVLM.disabled = false;
+                    btnTriggerVLM.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Tanya AI`;
+                }
+            } catch (err) {
+                console.error("Gagal memicu VLM secara manual:", err);
+                btnTriggerVLM.disabled = false;
+                btnTriggerVLM.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg> Tanya AI`;
+            }
+        });
 
         // Mengambil Statistik Terkini
         async function fetchStats() {

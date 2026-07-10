@@ -340,23 +340,7 @@ func (sp *StreamProcessor) Start() {
 						}(jpegData)
 					}
 
-					// Panggil Google Gemini API kognitif secara asinkron (setiap 15 detik jika sedang tidak sibuk)
-					sp.geminiBusyMu.Lock()
-					gBusy := sp.geminiBusy
-					sp.geminiBusyMu.Unlock()
 
-					// Cek kunci API sesuai provider VLM terpilih
-					hasAPIKey := false
-					if sp.vlmProvider == "openai" {
-						hasAPIKey = (sp.openaiAPIKey != "")
-					} else {
-						hasAPIKey = (sp.geminiAPIKey != "")
-					}
-
-					if hasAPIKey && now.Sub(sp.geminiLastCheck) >= 15*time.Second && !gBusy {
-						sp.geminiLastCheck = now
-						sp.callVLMAPI(jpegData)
-					}
 
 					// Salin deteksi terakhir untuk digambar pada frame ini
 					sp.detectionsMu.Lock()
@@ -551,14 +535,31 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 			}
 			log.Println("WARNING!!! DETEKSI BAHAYA LOKAL AKTIF!")
 			go sp.saveFireSnapshot(jpegData, detections)
+
+			// Cek kunci API sesuai provider VLM terpilih
+			hasAPIKey := false
+			if sp.vlmProvider == "openai" {
+				hasAPIKey = (sp.openaiAPIKey != "")
+			} else {
+				hasAPIKey = (sp.geminiAPIKey != "")
+			}
+
+			// Panggil VLM (Teacher) untuk memverifikasi bahaya kebakaran yang dideteksi oleh YOLO
+			sp.geminiBusyMu.Lock()
+			gBusy := sp.geminiBusy
+			sp.geminiBusyMu.Unlock()
+			if hasAPIKey && !gBusy && time.Since(sp.geminiLastCheck) >= 10*time.Second {
+				sp.geminiLastCheck = time.Now()
+				go sp.callVLMAPI(jpegData)
+			}
 		}
 	} else {
 		if sp.geminiFireAlert {
 			sp.geminiFireAlert = false
 		}
 		
-		if sp.geminiAPIKey == "" {
-			// Perbarui deskripsi secara dinamis berdasarkan deteksi manusia lokal
+		// Jika tidak sedang memasak dan tidak ada bahaya kebakaran, gunakan deskripsi lokal YOLO (100% hemat token)
+		if !sp.isCooking {
 			if localPersonDetected {
 				sp.geminiDescription = "Sistem lokal berjalan normal. Terdeteksi manusia, area aman dari api dan asap."
 			} else {
@@ -588,6 +589,23 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 				
 				// PENTING: Jalankan penyimpanan snapshot & log ke database secara asinkron
 				go sp.saveCookingSnapshot(jpegData, maxConf, detections)
+
+				// Cek kunci API sesuai provider VLM terpilih
+				hasAPIKey := false
+				if sp.vlmProvider == "openai" {
+					hasAPIKey = (sp.openaiAPIKey != "")
+				} else {
+					hasAPIKey = (sp.geminiAPIKey != "")
+				}
+
+				// Panggil VLM (Teacher) sekali saja ketika transisi memasak baru dimulai untuk analisis kognitif cerdas
+				sp.geminiBusyMu.Lock()
+				gBusy := sp.geminiBusy
+				sp.geminiBusyMu.Unlock()
+				if hasAPIKey && !gBusy && time.Since(sp.geminiLastCheck) >= 10*time.Second {
+					sp.geminiLastCheck = time.Now()
+					go sp.callVLMAPI(jpegData)
+				}
 			}
 		}
 	} else {
