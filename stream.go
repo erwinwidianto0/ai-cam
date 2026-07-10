@@ -194,6 +194,8 @@ func (sp *StreamProcessor) Start() {
 				// Argumen ffmpeg untuk mengambil stream RTSP dan menyajikan gambar JPEG di stdout
 				var args []string
 				isRTSP := strings.HasPrefix(strings.ToLower(sp.rtspURL), "rtsp://")
+				isHLS := strings.Contains(strings.ToLower(sp.rtspURL), ".m3u8")
+				
 				if isRTSP {
 					args = []string{
 						"-fflags", "nobuffer",       // Matikan buffering input jaringan
@@ -201,6 +203,19 @@ func (sp *StreamProcessor) Start() {
 						"-analyzeduration", "0",     // Jangan buang waktu menganalisis format
 						"-probesize", "32",          // Ukuran probe minimal
 						"-rtsp_transport", "tcp",
+						"-i", sp.rtspURL,
+						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
+						"-r", "30",                  // Paksa output stabil di 30 FPS
+						"-f", "image2pipe",
+						"-vcodec", "mjpeg",
+						"-q:v", "4",
+						"-pix_fmt", "yuvj420p",
+						"-",
+					}
+				} else if isHLS {
+					args = []string{
+						"-fflags", "nobuffer",       // Matikan buffering input jaringan
+						"-flags", "low_delay",       // Paksa mode delay rendah
 						"-i", sp.rtspURL,
 						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
 						"-r", "30",                  // Paksa output stabil di 30 FPS
