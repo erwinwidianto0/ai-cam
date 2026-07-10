@@ -1,13 +1,13 @@
 import sys
 from ultralytics import YOLO
 
-print("Memuat base model yolov8n.pt...")
-model = YOLO("yolov8n.pt")
+print("Memuat base model yolo26n.pt...")
+model = YOLO("yolo26n.pt")
 
 print("Mulai proses pelatihan...")
 model.train(
     data="./dataset/data.yaml",
-    epochs=50,
+    epochs=30,
     imgsz=640,
     device="cpu",
     verbose=True

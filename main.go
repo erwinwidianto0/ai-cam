@@ -223,6 +223,12 @@ func startModelTrainingBackground(modelType string, epochs int, device string) e
 	baseModel := "yolo26n.pt"
 	if modelType == "yolov8" {
 		baseModel = "yolov8n.pt"
+	} else if modelType == "yolo11" {
+		baseModel = "yolo11n.pt"
+	} else if modelType == "yolov10" {
+		baseModel = "yolov10n.pt"
+	} else if modelType == "yolov9" {
+		baseModel = "yolov9t.pt"
 	}
 	
 	pyDevice := "cpu"
@@ -1039,7 +1045,7 @@ func handleAPITrainStart(w http.ResponseWriter, r *http.Request) {
 	if req.Epochs <= 0 {
 		req.Epochs = 30
 	}
-	if req.ModelType != "yolo26" && req.ModelType != "yolov8" {
+	if req.ModelType != "yolo26" && req.ModelType != "yolov8" && req.ModelType != "yolo11" && req.ModelType != "yolov10" && req.ModelType != "yolov9" {
 		req.ModelType = "yolo26"
 	}
 	if req.Device != "cpu" && req.Device != "gpu" {
