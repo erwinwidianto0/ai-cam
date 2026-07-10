@@ -38,6 +38,7 @@ type Config struct {
 	GeminiAPIKey       string  `json:"gemini_api_key"`
 	GeminiPrompt       string  `json:"gemini_prompt"`
 	LastTrainedCount   int     `json:"last_trained_count"`
+	StreamResolution   string  `json:"stream_resolution"`
 }
 
 var (
@@ -77,6 +78,7 @@ func loadConfig() error {
 			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
 			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, asap, atau tanda-tanda awal potensi kebakaran seperti kompor menyala tanpa pengawasan, asap mulai membubung, atau benda mudah terbakar terlalu dekat dengan api (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur, bersandar pasif, terlelap, atau jatuh/pingsan tergeletak (sleeping: true/false)? 5) Apakah ada pelanggaran SOP/K3 seperti tindakan mencurigakan/pencurian, barang/bahan diletakkan tidak pada tempat semestinya (berantakan/di lantai), atau risiko kontaminasi bahan makanan oleh zat kimia berbahaya (sop_violation: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), 'sop_violation' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian, analisis peringatan dini, serta identifikasi pelanggaran dalam bahasa Indonesia).",
+			StreamResolution:   "640x360",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -112,6 +114,11 @@ func loadConfig() error {
 
 	if config.LastTrainedCount == 0 {
 		config.LastTrainedCount = countDatasetImages()
+		updated = true
+	}
+
+	if config.StreamResolution == "" {
+		config.StreamResolution = "640x360"
 		updated = true
 	}
 
@@ -399,7 +406,6 @@ func main() {
 	defer dbManager.Close()
 	log.Println("Database SQLite diinisialisasi sukses.")
 
-	// 3. Mulai Processor CCTV
 	aiClient := NewAIClient(config.AIEndpoint)
 	streamProcessor = NewStreamProcessor(
 		config.RTSPURL, 
@@ -415,6 +421,7 @@ func main() {
 		config.OpenAIAPIKey,
 		config.GeminiAPIKey,
 		config.GeminiPrompt,
+		config.StreamResolution,
 	)
 	streamProcessor.Start()
 	defer streamProcessor.Stop()
@@ -657,6 +664,7 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldOpenAIAPIKey := config.OpenAIAPIKey
 		oldGeminiAPIKey := config.GeminiAPIKey
 		oldGeminiPrompt := config.GeminiPrompt
+		oldResolution := config.StreamResolution
 		currentPort := config.Port // Ambil port aktif
 		lastTrainedCount := config.LastTrainedCount // Ambil last trained count aktif agar tidak ter-reset
 		configMu.RUnlock()
@@ -682,7 +690,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			oldVLMProvider != newCfg.VLMProvider ||
 			oldOpenAIAPIKey != newCfg.OpenAIAPIKey ||
 			oldGeminiAPIKey != newCfg.GeminiAPIKey ||
-			oldGeminiPrompt != newCfg.GeminiPrompt {
+			oldGeminiPrompt != newCfg.GeminiPrompt ||
+			oldResolution != newCfg.StreamResolution {
 			
 			log.Println("Mendeteksi perubahan konfigurasi. Mengatur ulang aliran CCTV...")
 			
@@ -704,6 +713,7 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 				newCfg.OpenAIAPIKey,
 				newCfg.GeminiAPIKey,
 				newCfg.GeminiPrompt,
+				newCfg.StreamResolution,
 			)
 			streamProcessor.Start()
 			processorMu.Unlock()

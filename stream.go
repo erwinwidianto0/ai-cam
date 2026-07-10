@@ -23,10 +23,11 @@ import (
 
 // StreamProcessor menangani pemrosesan RTSP stream menggunakan FFmpeg
 type StreamProcessor struct {
-	rtspURL       string
-	aiClient      *AIClient
-	db            *DBManager
-	confThreshold float64
+	rtspURL          string
+	aiClient         *AIClient
+	db               *DBManager
+	confThreshold    float64
+	streamResolution string
 
 	// Koordinat zona memasak (ROI) dalam persentase (0.0 - 1.0)
 	zoneXMin float64
@@ -93,12 +94,14 @@ func NewStreamProcessor(
 	openaiAPIKey string,
 	geminiAPIKey string,
 	geminiPrompt string,
+	streamResolution string,
 ) *StreamProcessor {
 	return &StreamProcessor{
 		rtspURL:            rtspURL,
 		aiClient:           aiClient,
 		db:                 db,
 		confThreshold:      confThreshold,
+		streamResolution:   streamResolution,
 		zoneXMin:           zxMin,
 		zoneYMin:           zyMin,
 		zoneXMax:           zxMax,
@@ -191,7 +194,7 @@ func (sp *StreamProcessor) Start() {
 			default:
 				log.Println("Memulai koneksi ke RTSP stream via FFmpeg...")
 				
-				// Argumen ffmpeg untuk mengambil stream RTSP dan menyajikan gambar JPEG di stdout
+				// Argumen ffmpeg untuk mengambil stream secara dinamis
 				var args []string
 				isRTSP := strings.HasPrefix(strings.ToLower(sp.rtspURL), "rtsp://")
 				isHLS := strings.Contains(strings.ToLower(sp.rtspURL), ".m3u8")
@@ -204,26 +207,12 @@ func (sp *StreamProcessor) Start() {
 						"-probesize", "32",          // Ukuran probe minimal
 						"-rtsp_transport", "tcp",
 						"-i", sp.rtspURL,
-						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
-						"-r", "30",                  // Paksa output stabil di 30 FPS
-						"-f", "image2pipe",
-						"-vcodec", "mjpeg",
-						"-q:v", "4",
-						"-pix_fmt", "yuvj420p",
-						"-",
 					}
 				} else if isHLS {
 					args = []string{
 						"-fflags", "nobuffer",       // Matikan buffering input jaringan
 						"-flags", "low_delay",       // Paksa mode delay rendah
 						"-i", sp.rtspURL,
-						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
-						"-r", "30",                  // Paksa output stabil di 30 FPS
-						"-f", "image2pipe",
-						"-vcodec", "mjpeg",
-						"-q:v", "4",
-						"-pix_fmt", "yuvj420p",
-						"-",
 					}
 				} else {
 					args = []string{
@@ -232,15 +221,24 @@ func (sp *StreamProcessor) Start() {
 						"-re",
 						"-stream_loop", "-1",
 						"-i", sp.rtspURL,
-						"-vf", "scale=640:360",      // Downscale ke 640x360 untuk performa FPS maksimal
-						"-r", "30",                  // Paksa output stabil di 30 FPS
-						"-f", "image2pipe",
-						"-vcodec", "mjpeg",
-						"-q:v", "4",
-						"-pix_fmt", "yuvj420p",
-						"-",
 					}
 				}
+
+				// Tambahkan filter skala resolusi secara dinamis jika tidak diset "original"
+				if sp.streamResolution != "original" && sp.streamResolution != "" {
+					resStr := strings.Replace(sp.streamResolution, "x", ":", 1)
+					args = append(args, "-vf", fmt.Sprintf("scale=%s", resStr))
+				}
+
+				// Tambahkan parameter output MJPEG
+				args = append(args,
+					"-r", "30",                  // Paksa output stabil di 30 FPS
+					"-f", "image2pipe",
+					"-vcodec", "mjpeg",
+					"-q:v", "4",
+					"-pix_fmt", "yuvj420p",
+					"-",
+				)
 				cmd := exec.Command(ffmpegPath, args...)
 
 				stdout, err := cmd.StdoutPipe()

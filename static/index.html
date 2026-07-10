@@ -423,9 +423,20 @@
                 <button class="btn-close-modal" id="btn-close-settings">&times;</button>
             </div>
             <form id="form-settings">
-                <div class="form-group">
-                    <label for="rtsp-url">RTSP CCTV URL</label>
-                    <input type="text" id="rtsp-url" name="rtsp_url" required>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rtsp-url">RTSP / HTTPS CCTV URL</label>
+                        <input type="text" id="rtsp-url" name="rtsp_url" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="stream-resolution">Resolusi Aliran Video</label>
+                        <select id="stream-resolution" name="stream_resolution">
+                            <option value="640x360">Standar (640x360) - Hemat CPU & FPS Tinggi</option>
+                            <option value="1280x720">HD (1280x720) - Lebih Tajam</option>
+                            <option value="1920x1080">Full HD (1920x1080) - Sangat Jelas</option>
+                            <option value="original">Resolusi Asli Kamera (Tanpa Downscale)</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -730,6 +741,7 @@
                 const response = await fetch('/api/settings');
                 const data = await response.json();
                 document.getElementById('rtsp-url').value = data.rtsp_url;
+                document.getElementById('stream-resolution').value = data.stream_resolution || "640x360";
                 document.getElementById('ai-endpoint').value = data.ai_endpoint;
                 document.getElementById('conf-threshold').value = data.conf_threshold;
                 document.getElementById('zone-x-min').value = data.zone_x_min;
@@ -760,6 +772,7 @@
             const formData = new FormData(formSettings);
             const payload = {
                 rtsp_url: formData.get('rtsp_url'),
+                stream_resolution: formData.get('stream_resolution'),
                 ai_endpoint: formData.get('ai_endpoint'),
                 conf_threshold: parseFloat(formData.get('conf_threshold')),
                 zone_x_min: parseFloat(formData.get('zone_x_min')),
