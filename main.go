@@ -242,6 +242,14 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Pragma", "no-cache")
 
+	// Kirim status header 200 OK secara eksplisit
+	w.WriteHeader(http.StatusOK)
+
+	// Flush header seketika agar browser menghentikan spinner loadingnya
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
 	// Pastikan client menutup koneksi dengan benar
 	notify := r.Context().Done()
 
