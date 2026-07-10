@@ -186,6 +186,7 @@ func (sp *StreamProcessor) Start() {
 					args = []string{
 						"-rtsp_transport", "tcp",
 						"-i", sp.rtspURL,
+						"-r", "30", // Paksa output stabil di 30 FPS
 						"-f", "image2pipe",
 						"-vcodec", "mjpeg",
 						"-q:v", "4",
@@ -197,6 +198,7 @@ func (sp *StreamProcessor) Start() {
 						"-re",
 						"-stream_loop", "-1",
 						"-i", sp.rtspURL,
+						"-r", "30", // Paksa output stabil di 30 FPS
 						"-f", "image2pipe",
 						"-vcodec", "mjpeg",
 						"-q:v", "4",
