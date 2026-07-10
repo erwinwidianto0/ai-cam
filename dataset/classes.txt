@@ -9,3 +9,10 @@ motor
 ruangan dapur
 meja
 botol
+tangan
+tempat tidur
+kursi
+lemari
+alat masak
+jendela
+tanaman

@@ -206,12 +206,14 @@ func (sp *StreamProcessor) Start() {
 						"-analyzeduration", "0",     // Jangan buang waktu menganalisis format
 						"-probesize", "32",          // Ukuran probe minimal
 						"-rtsp_transport", "tcp",
+						"-stimeout", "5000000",      // Timeout RTSP 5 detik (dalam mikrodetik)
 						"-i", sp.rtspURL,
 					}
 				} else if isHLS {
 					args = []string{
 						"-fflags", "nobuffer",       // Matikan buffering input jaringan
 						"-flags", "low_delay",       // Paksa mode delay rendah
+						"-timeout", "5000000",       // Timeout jaringan HTTP 5 detik (dalam mikrodetik)
 						"-i", sp.rtspURL,
 					}
 				} else {
@@ -261,7 +263,7 @@ func (sp *StreamProcessor) Start() {
 				go func() {
 					scanner := bufio.NewScanner(stdout)
 					buf := make([]byte, 1024*1024)
-					scanner.Buffer(buf, 2*1024*1024)
+					scanner.Buffer(buf, 10*1024*1024) // Dukung frame resolusi tinggi/asli yang sangat besar (10MB)
 					scanner.Split(splitJPEG)
 
 					for scanner.Scan() {
@@ -286,7 +288,14 @@ func (sp *StreamProcessor) Start() {
 							frameChan <- frameCopy
 						}
 					}
+					
+					if scanErr := scanner.Err(); scanErr != nil {
+						log.Printf("FFmpeg stream Scanner error: %v", scanErr)
+					}
 					close(frameChan)
+					
+					// PENTING: Paksa matikan FFmpeg jika scanner berhenti agar tidak deadlock menggantung!
+					cmd.Process.Kill()
 				}()
 
 				lastAIDetectTime := time.Time{}
@@ -516,6 +525,7 @@ func (sp *StreamProcessor) Start() {
 					sp.broadcast(jpegData)
 				}
 
+				cmd.Process.Kill()
 				if err := cmd.Wait(); err != nil {
 					log.Printf("Proses FFmpeg berhenti: %v", err)
 				}
