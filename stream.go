@@ -411,10 +411,17 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 	colorYellow := color.RGBA{R: 245, G: 158, B: 11, A: 255} // Kuning
 	colorBlue := color.RGBA{R: 59, G: 130, B: 246, A: 255}   // Biru
 
+	localFireDetected := false
+	localSmokeDetected := false
+
 	// Proses setiap objek terdeteksi
 	for _, det := range detections {
-		// Kita hanya memproses objek manusia ("person")
-		if det.Label != "person" {
+		isPerson := det.Label == "person"
+		isFire := det.Label == "fire"
+		isSmoke := det.Label == "smoke"
+
+		// Kita memproses manusia, api, atau asap
+		if !isPerson && !isFire && !isSmoke {
 			continue
 		}
 		
@@ -432,13 +439,47 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		if x2 >= bounds.Max.X { x2 = bounds.Max.X - 1 }
 		if y2 >= bounds.Max.Y { y2 = bounds.Max.Y - 1 }
 
-		// Gambar kotak pembatas objek orang (merah)
-		drawBox(rgbaImg, x1, y1, x2, y2, colorRed, 3)
+		// Pilih warna dan label teks berdasarkan jenis objek
+		var boxColor color.Color = colorRed
+		var labelText string
 
-		// Gambar label teks "Manusia [Akurasi]%" di atas kotak merah
-		confPercent := int(det.Confidence * 100)
-		labelText := fmt.Sprintf("Manusia %d%%", confPercent)
+		if isPerson {
+			boxColor = colorRed
+			confPercent := int(det.Confidence * 100)
+			labelText = fmt.Sprintf("Manusia %d%%", confPercent)
 
+			// LOGIKA DETEKSI ZONA MEMASAK (ROI):
+			// Kita ambil posisi kaki orang tersebut (tengah bawah dari bounding box):
+			px := (x1 + x2) / 2
+			py := y2
+
+			// Normalisasikan koordinat absolut menjadi koordinat rasio persen (0.0 - 1.0)
+			normX := float64(px) / width
+			normY := float64(py) / height
+
+			// Cek apakah koordinat kaki masuk ke dalam area Zona ROI
+			if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
+				personInZone = true
+				if det.Confidence > maxConf {
+					maxConf = det.Confidence
+				}
+			}
+		} else if isFire {
+			boxColor = color.RGBA{R: 249, G: 115, B: 22, A: 255} // Orange menyala
+			confPercent := int(det.Confidence * 100)
+			labelText = fmt.Sprintf("API! %d%%", confPercent)
+			localFireDetected = true
+		} else if isSmoke {
+			boxColor = color.RGBA{R: 156, G: 163, B: 175, A: 255} // Abu-abu asap
+			confPercent := int(det.Confidence * 100)
+			labelText = fmt.Sprintf("ASAP! %d%%", confPercent)
+			localSmokeDetected = true
+		}
+
+		// Gambar kotak pembatas objek
+		drawBox(rgbaImg, x1, y1, x2, y2, boxColor, 3)
+
+		// Gambar label teks di atas kotak
 		fontScale := 1
 		if height > 500 {
 			fontScale = 2
@@ -452,26 +493,31 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		}
 
 		labelWidth := len(labelText) * charStep
-		drawFilledRect(rgbaImg, x1, labelY, x1+labelWidth, labelY+labelHeight+2, colorRed)
+		drawFilledRect(rgbaImg, x1, labelY, x1+labelWidth, labelY+labelHeight+2, boxColor)
 		drawText(rgbaImg, x1+3, labelY+2, labelText, color.White, fontScale)
+	}
 
-		// LOGIKA DETEKSI ZONA MEMASAK (ROI):
-		// Kita ambil posisi kaki orang tersebut (tengah bawah dari bounding box):
-		px := (x1 + x2) / 2
-		py := y2
-
-		// Normalisasikan koordinat absolut menjadi koordinat rasio persen (0.0 - 1.0)
-		normX := float64(px) / width
-		normY := float64(py) / height
-
-		// Cek apakah koordinat kaki masuk ke dalam area Zona ROI
-		if normX >= sp.zoneXMin && normX <= sp.zoneXMax && normY >= sp.zoneYMin && normY <= sp.zoneYMax {
-			personInZone = true
-			if det.Confidence > maxConf {
-				maxConf = det.Confidence
+	// Update alarm status lokal berdasarkan deteksi sensor visual YOLOv8
+	sp.statusMu.Lock()
+	if localFireDetected || localSmokeDetected {
+		if !sp.geminiFireAlert {
+			sp.geminiFireAlert = true
+			if localFireDetected {
+				sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi indikasi API secara real-time!"
+			} else {
+				sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi indikasi ASAP secara real-time!"
 			}
+			log.Println("WARNING!!! DETEKSI BAHAYA LOKAL AKTIF!")
+			go sp.saveFireSnapshot(jpegData)
+		}
+	} else if sp.geminiAPIKey == "" {
+		// Hanya matikan alarm secara otomatis jika Gemini nonaktif (agar tidak menimpa status Gemini jika aktif)
+		if sp.geminiFireAlert {
+			sp.geminiFireAlert = false
+			sp.geminiDescription = "Sistem lokal berjalan normal. Tidak terdeteksi manusia, api, atau asap."
 		}
 	}
+	sp.statusMu.Unlock()
 
 	// STATE MACHINE DETEKSI MEMASAK
 	now := time.Now()

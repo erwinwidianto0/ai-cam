@@ -8,19 +8,25 @@ import sys
 
 app = FastAPI(title="YOLOv8 Inference Service", description="Local AI service for CCTV object detection")
 
-# Memuat model YOLOv8 (yolov8n.pt adalah model paling ringan dan cepat)
-# Model akan diunduh secara otomatis pada saat pertama kali dijalankan jika belum ada.
+from huggingface_hub import hf_hub_download
+
+# Memuat model YOLOv8 (yolov8n.pt untuk manusia, rabahdev/fire-smoke-yolov8n untuk api/asap)
 try:
-    print("Loading YOLOv8 model...")
-    model = YOLO("yolov8n.pt")
-    print("YOLOv8 model loaded successfully.")
+    print("Loading YOLOv8 person model...")
+    model_person = YOLO("yolov8n.pt")
+    print("YOLOv8 person model loaded successfully.")
+    
+    print("Downloading/Loading YOLOv8 fire/smoke model from Hugging Face...")
+    fire_ckpt = hf_hub_download(repo_id="rabahdev/fire-smoke-yolov8n", filename="best.pt")
+    model_fire = YOLO(fire_ckpt)
+    print("YOLOv8 fire/smoke model loaded successfully.")
 except Exception as e:
-    print(f"Error loading model: {e}")
+    print(f"Error loading models: {e}")
     sys.exit(1)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": "yolov8n.pt"}
+    return {"status": "ok", "person_model": "yolov8n.pt", "fire_model": "fire-smoke-yolov8n"}
 
 @app.post("/detect")
 async def detect(file: bytes = File(...)):
@@ -28,31 +34,49 @@ async def detect(file: bytes = File(...)):
         # Baca gambar dari byte raw JPEG
         image = Image.open(io.BytesIO(file))
         
-        # Jalankan inferensi YOLOv8
-        # verbose=False untuk mengurangi output log yang tidak perlu di konsol
-        results = model(image, verbose=False)
+        # Jalankan inferensi YOLOv8 untuk manusia
+        results_person = model_person(image, verbose=False)
+        
+        # Jalankan inferensi YOLOv8 untuk api/asap
+        results_fire = model_fire(image, verbose=False)
         
         detections = []
-        for result in results:
+        
+        # 1. Proses deteksi manusia
+        for result in results_person:
             boxes = result.boxes
             for box in boxes:
                 cls_id = int(box.cls[0])
-                label = model.names[cls_id]
+                label = model_person.names[cls_id]
                 
-                # Saring hanya objek manusia ("person") yang diproses
-                if label != "person":
-                    continue
+                # Hanya ambil objek manusia ("person")
+                if label == "person":
+                    confidence = float(box.conf[0])
+                    x1, y1, x2, y2 = map(float, box.xyxy[0])
+                    detections.append({
+                        "class": cls_id,
+                        "label": label,
+                        "confidence": confidence,
+                        "box": [x1, y1, x2, y2]
+                    })
                     
-                confidence = float(box.conf[0])
-                # Koordinat bounding box x1, y1, x2, y2
-                x1, y1, x2, y2 = map(float, box.xyxy[0])
+        # 2. Proses deteksi api/asap
+        for result in results_fire:
+            boxes = result.boxes
+            for box in boxes:
+                cls_id = int(box.cls[0])
+                label = model_fire.names[cls_id]
                 
-                detections.append({
-                    "class": cls_id,
-                    "label": label,
-                    "confidence": confidence,
-                    "box": [x1, y1, x2, y2]
-                })
+                # Hanya ambil objek api ("fire") atau asap ("smoke")
+                if label in ["fire", "smoke"]:
+                    confidence = float(box.conf[0])
+                    x1, y1, x2, y2 = map(float, box.xyxy[0])
+                    detections.append({
+                        "class": cls_id + 100, # Offset ID agar unik
+                        "label": label,
+                        "confidence": confidence,
+                        "box": [x1, y1, x2, y2]
+                    })
                 
         return JSONResponse(content={"detections": detections})
         
