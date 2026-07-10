@@ -45,20 +45,31 @@ async def detect(file: bytes = File(...)):
         
         detections = []
         
-        # 1. Proses deteksi manusia
+        # 1. Proses deteksi manusia / kelas kustom lainnya
+        is_custom = (model_path == "custom_model.pt")
         for result in results_person:
             boxes = result.boxes
             for box in boxes:
                 cls_id = int(box.cls[0])
                 label = model_person.names[cls_id]
                 
-                # Hanya ambil objek manusia ("person")
-                if label == "person":
+                # Jika menggunakan model kustom, loloskan semua kelas kustomnya.
+                # Jika menggunakan model standar, hanya loloskan "person".
+                if is_custom or label == "person":
+                    # Standarisasi nama label bahasa Indonesia ke bahasa Inggris agar dikenali oleh Go
+                    mapped_label = label
+                    if label == "manusia":
+                        mapped_label = "person"
+                    elif label == "api":
+                        mapped_label = "fire"
+                    elif label == "asap":
+                        mapped_label = "smoke"
+                        
                     confidence = float(box.conf[0])
                     x1, y1, x2, y2 = map(float, box.xyxy[0])
                     detections.append({
                         "class": cls_id,
-                        "label": label,
+                        "label": mapped_label,
                         "confidence": confidence,
                         "box": [x1, y1, x2, y2]
                     })

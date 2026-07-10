@@ -446,11 +446,6 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		isFire := det.Label == "fire"
 		isSmoke := det.Label == "smoke"
 
-		// Kita memproses manusia, api, atau asap
-		if !isPerson && !isFire && !isSmoke {
-			continue
-		}
-		
 		if det.Confidence < sp.confThreshold {
 			continue
 		}
@@ -500,6 +495,11 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 			confPercent := int(det.Confidence * 100)
 			labelText = fmt.Sprintf("ASAP! %d%%", confPercent)
 			localSmokeDetected = true
+		} else {
+			// Kelas kustom lainnya (mobil, motor, pemadam api, dll)
+			boxColor = color.RGBA{R: 16, G: 185, B: 129, A: 255} // Hijau toska
+			confPercent := int(det.Confidence * 100)
+			labelText = fmt.Sprintf("%s %d%%", det.Label, confPercent)
 		}
 
 		// Gambar kotak pembatas objek
