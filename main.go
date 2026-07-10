@@ -1124,7 +1124,7 @@ func detectObjectsWithGemini(imgBytes []byte, apiKey string) ([]AIDetection, err
 	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
 
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
-Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher). 
+Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
 
 Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
 Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
@@ -1414,7 +1414,7 @@ func detectObjectsWithOpenAI(imgBytes []byte, apiKey string) ([]AIDetection, err
 	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
 
 	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
-Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher). 
+Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher), 'merokok' (smoking), 'tidur' (sleeping). 
 
 Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
 Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
