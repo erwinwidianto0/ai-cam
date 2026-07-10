@@ -180,15 +180,31 @@ func (sp *StreamProcessor) Start() {
 				log.Println("Memulai koneksi ke RTSP stream via FFmpeg...")
 				
 				// Argumen ffmpeg untuk mengambil stream RTSP dan menyajikan gambar JPEG di stdout
-				cmd := exec.Command(ffmpegPath,
-					"-rtsp_transport", "tcp",
-					"-i", sp.rtspURL,
-					"-f", "image2pipe",
-					"-vcodec", "mjpeg",
-					"-q:v", "4", // Kualitas gambar
-					"-pix_fmt", "yuvj420p",
-					"-",
-				)
+				var args []string
+				isRTSP := strings.HasPrefix(strings.ToLower(sp.rtspURL), "rtsp://")
+				if isRTSP {
+					args = []string{
+						"-rtsp_transport", "tcp",
+						"-i", sp.rtspURL,
+						"-f", "image2pipe",
+						"-vcodec", "mjpeg",
+						"-q:v", "4",
+						"-pix_fmt", "yuvj420p",
+						"-",
+					}
+				} else {
+					args = []string{
+						"-re",
+						"-stream_loop", "-1",
+						"-i", sp.rtspURL,
+						"-f", "image2pipe",
+						"-vcodec", "mjpeg",
+						"-q:v", "4",
+						"-pix_fmt", "yuvj420p",
+						"-",
+					}
+				}
+				cmd := exec.Command(ffmpegPath, args...)
 
 				stdout, err := cmd.StdoutPipe()
 				if err != nil {

@@ -2,3 +2,6 @@ api
 pemadam api
 asap
 manusia
+mobil
+dua mobil
+motor
