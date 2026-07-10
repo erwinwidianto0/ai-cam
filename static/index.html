@@ -226,21 +226,44 @@
     <!-- Tab 2: AI Labeling Center -->
     <div id="tab-labeling" class="tab-content">
         <main class="tab-layout labeling-grid-layout">
-            <!-- Panel Kiri: Antrean Foto Mentah -->
-            <div class="panel-files card">
-                <div class="card-header" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <h2>Kelola Dataset</h2>
+            <!-- Panel Kiri: Antrean Foto Mentah & Generator Simulasi -->
+            <div style="display: flex; flex-direction: column; gap: 16px;" class="panel-files-wrapper">
+                <div class="panel-files card" style="flex: 1; margin-bottom: 0;">
+                    <div class="card-header" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <h2>Kelola Dataset</h2>
+                        </div>
+                        <div style="display: flex; gap: 6px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 8px; width: 100%;">
+                            <button class="nav-tab active" id="btn-show-raw" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Belum Labeled</button>
+                            <button class="nav-tab" id="btn-show-labeled" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Sudah Labeled</button>
+                        </div>
                     </div>
-                    <div style="display: flex; gap: 6px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 8px; width: 100%;">
-                        <button class="nav-tab active" id="btn-show-raw" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Belum Labeled</button>
-                        <button class="nav-tab" id="btn-show-labeled" style="flex: 1; padding: 6px 12px; font-size: 11px; border: none; font-weight: bold; margin: 0;">Sudah Labeled</button>
+                    <div class="files-list-container" id="raw-files-list">
+                        <div class="empty-state">
+                            <p>Belum ada file. Silakan klik tombol Upload Foto.</p>
+                        </div>
                     </div>
                 </div>
-                <div class="files-list-container" id="raw-files-list">
-                    <div class="empty-state">
-                        <p>Belum ada file. Silakan klik tombol Upload Foto.</p>
+
+                <!-- Generator Simulasi AI -->
+                <div class="card" style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+                    <div class="card-header" style="padding: 0; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.05); min-height: auto;">
+                        <h2 style="font-size: 13px; font-weight: 700; color: #f3f4f6; letter-spacing: 0.5px; text-transform: uppercase;">Generator Simulasi AI</h2>
                     </div>
+                    <span style="font-size: 10px; color: rgba(255,255,255,0.5); line-height: 1.4;">Buat gambar simulasi kejadian secara sintetis lewat AI untuk melatih model YOLO dapur Anda.</span>
+                    
+                    <input type="text" id="sim-prompt-input" placeholder="Contoh: kompor dapur gas terbakar" style="padding: 8px 10px; font-size: 12px; border-radius: 6px; width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #fff;">
+                    
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                        <button type="button" class="btn btn-secondary sim-preset-btn" data-prompt="Kompor dapur gas terbakar api menyala merah jingga besar dengan asap abu-abu tebal" style="padding: 4px 6px; font-size: 9px; border-radius: 4px; line-height: 1; height: auto; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">🔥 Kebakaran</button>
+                        <button type="button" class="btn btn-secondary sim-preset-btn" data-prompt="Dapur penuh dengan asap abu-abu putih tebal menyelimuti langit-langit" style="padding: 4px 6px; font-size: 9px; border-radius: 4px; line-height: 1; height: auto; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">🌫️ Asap Tebal</button>
+                        <button type="button" class="btn btn-secondary sim-preset-btn" data-prompt="Seorang koki sedang tidur terlelap di lantai dapur yang berantakan" style="padding: 4px 6px; font-size: 9px; border-radius: 4px; line-height: 1; height: auto; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">😴 Petugas Tidur</button>
+                        <button type="button" class="btn btn-secondary sim-preset-btn" data-prompt="Seorang pria sedang merokok mengeluarkan asap rokok tebal di dalam dapur" style="padding: 4px 6px; font-size: 9px; border-radius: 4px; line-height: 1; height: auto; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">🚬 Orang Merokok</button>
+                    </div>
+
+                    <button id="btn-generate-sim" class="btn btn-primary" style="font-size: 11px; padding: 8px 12px; width: 100%; background: linear-gradient(135deg, #10b981, #059669); border: none; font-weight: 600; border-radius: 6px;">
+                        Bikin Gambar Simulasi
+                    </button>
                 </div>
             </div>
 
@@ -1669,6 +1692,59 @@
                 fileInput.value = ''; // Reset input agar bisa upload file yang sama jika diinginkan
             }
         });
+
+        // ==========================================
+        // JS LOGIC FOR AI SCENARIO GENERATOR
+        // ==========================================
+        const btnGenerateSim = document.getElementById('btn-generate-sim');
+        const simPromptInput = document.getElementById('sim-prompt-input');
+        const simPresetBtns = document.querySelectorAll('.sim-preset-btn');
+
+        // Binds preset buttons
+        simPresetBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                simPromptInput.value = btn.getAttribute('data-prompt');
+            });
+        });
+
+        if (btnGenerateSim) {
+            btnGenerateSim.addEventListener('click', async () => {
+                const prompt = simPromptInput.value.trim();
+                if (!prompt) {
+                    alert("Masukkan prompt simulasi terlebih dahulu!");
+                    return;
+                }
+
+                btnGenerateSim.disabled = true;
+                btnGenerateSim.textContent = "Sedang Membuat Gambar...";
+
+                try {
+                    const res = await fetch('/api/label/generate-simulation', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ prompt: prompt })
+                    });
+                    const result = await res.json();
+
+                    if (result.status === 'success') {
+                        simPromptInput.value = '';
+                        // Refresh daftar file mentah
+                        await fetchRawImages();
+                        alert("Sukses! Gambar simulasi baru telah dibuat oleh AI dan masuk ke antrean 'Belum Labeled'!");
+                    } else {
+                        alert("Gagal membuat gambar simulasi: " + result.message);
+                    }
+                } catch (err) {
+                    console.error("Error generating simulation image:", err);
+                    alert("Error saat membuat gambar simulasi: " + err);
+                } finally {
+                    btnGenerateSim.disabled = false;
+                    btnGenerateSim.textContent = "Bikin Gambar Simulasi";
+                }
+            });
+        }
 
         // ==========================================
         // JS LOGIC FOR LOCAL TRAINING CENTER

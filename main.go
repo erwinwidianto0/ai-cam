@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -213,6 +214,7 @@ func main() {
 	http.HandleFunc("/api/label/upload", handleAPILabelUpload)
 	http.HandleFunc("/api/label/images-labeled", handleAPILabelImagesLabeled)
 	http.HandleFunc("/api/label/autodetect", handleAPILabelAutoDetect)
+	http.HandleFunc("/api/label/generate-simulation", handleAPILabelGenerateSimulation)
 	http.HandleFunc("/api/train/start", handleAPITrainStart)
 	http.HandleFunc("/api/train/status", handleAPITrainStatus)
 	http.HandleFunc("/api/train/stop", handleAPITrainStop)
@@ -1584,4 +1586,75 @@ func handleAPIVLMTrigger(w http.ResponseWriter, r *http.Request) {
 	go sp.callVLMAPI(rawJPEG)
 
 	json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Kueri VLM berhasil dipicu secara manual"})
+}
+
+// handleAPILabelGenerateSimulation mengunduh gambar simulasi buatan dari Pollinations.ai secara gratis
+func handleAPILabelGenerateSimulation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"status": "error", "message": "Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Prompt string `json:"prompt"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || strings.TrimSpace(req.Prompt) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Prompt tidak boleh kosong"})
+		return
+	}
+
+	// Gabungkan prompt dengan konteks CCTV dapur realistis
+	finalPrompt := fmt.Sprintf("A realistic security camera CCTV footage screenshot of a kitchen, %s, wide angle lens, highly detailed, photorealistic", strings.TrimSpace(req.Prompt))
+	encodedPrompt := url.QueryEscape(finalPrompt)
+
+	// Buat URL Pollinations.ai (menggunakan seed acak agar gambar bervariasi)
+	seed := time.Now().UnixNano() % 100000
+	apiURL := fmt.Sprintf("https://image.pollinations.ai/prompt/%s?width=800&height=600&seed=%d&nologo=true", encodedPrompt, seed)
+
+	// Unduh gambar
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal menghubungi AI Generator: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("AI Generator mengembalikan status: %d", resp.StatusCode)})
+		return
+	}
+
+	// Baca byte gambar
+	imgBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal membaca hasil gambar: %v", err)})
+		return
+	}
+
+	// Pastikan folder dataset/raw ada
+	os.MkdirAll("dataset/raw", 0755)
+
+	// Tentukan nama file tujuan
+	filename := fmt.Sprintf("simulasi_%d.jpg", time.Now().Unix())
+	targetPath := filepath.Join("dataset", "raw", filename)
+
+	err = os.WriteFile(targetPath, imgBytes, 0644)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal menyimpan gambar ke disk: %v", err)})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "success",
+		"filename": filename,
+		"message":  "Gambar simulasi berhasil dibuat dan disimpan di dataset/raw",
+	})
 }
