@@ -536,7 +536,7 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 				sp.geminiDescription = "DETEKSI DARURAT LOKAL (YOLOv8): Terdeteksi indikasi ASAP secara real-time!"
 			}
 			log.Println("WARNING!!! DETEKSI BAHAYA LOKAL AKTIF!")
-			go sp.saveFireSnapshot(jpegData)
+			go sp.saveFireSnapshot(jpegData, detections)
 		}
 	} else {
 		if sp.geminiFireAlert {
@@ -573,7 +573,7 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 				sp.kitchenStatus = "Memasak"
 				
 				// PENTING: Jalankan penyimpanan snapshot & log ke database secara asinkron
-				go sp.saveCookingSnapshot(jpegData, maxConf)
+				go sp.saveCookingSnapshot(jpegData, maxConf, detections)
 			}
 		}
 	} else {
@@ -641,7 +641,7 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 }
 
 // saveCookingSnapshot menyimpan snapshot frame yang digambar box ke disk & log ke database
-func (sp *StreamProcessor) saveCookingSnapshot(jpegData []byte, conf float64) {
+func (sp *StreamProcessor) saveCookingSnapshot(jpegData []byte, conf float64, detections []AIDetection) {
 	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
 	sp.currentFrameMu.RLock()
 	processedJPEG := make([]byte, len(sp.currentFrame))
@@ -672,6 +672,8 @@ func (sp *StreamProcessor) saveCookingSnapshot(jpegData []byte, conf float64) {
 		log.Printf("Gagal mencatat log memasak ke SQLite: %v", dbErr)
 	} else {
 		log.Printf("DETEKSI MEMASAK AKTIF! Foto disimpan: %s", snapshotFilename)
+		// Simpan otomatis foto bersih dan anotasi koordinat YOLO ke dataset latihan
+		go sp.saveToTrainingDataset(jpegData, detections)
 	}
 }
 
@@ -941,7 +943,7 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 		if fireTriggered {
 			log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI GEMINI: %s", result.Description)
 			// Simpan bukti foto snapshot kebakaran
-			go sp.saveFireSnapshot(jpegData)
+			go sp.saveFireSnapshot(jpegData, nil)
 		}
 	}()
 }
@@ -957,7 +959,7 @@ func sanitizeJSON(input string) string {
 }
 
 // saveFireSnapshot menyimpan snapshot bukti kebakaran ke disk & log ke database SQLite
-func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte) {
+func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte, detections []AIDetection) {
 	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
 	sp.currentFrameMu.RLock()
 	processedJPEG := make([]byte, len(sp.currentFrame))
@@ -988,7 +990,117 @@ func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte) {
 		log.Printf("Gagal mencatat log kebakaran ke SQLite: %v", dbErr)
 	} else {
 		log.Printf("DARURAT KEBAKARAN TERCATAT! Foto disimpan: %s", snapshotFilename)
+		// Simpan otomatis foto bersih dan anotasi koordinat YOLO ke dataset latihan jika ada deteksi lokal
+		if len(detections) > 0 {
+			go sp.saveToTrainingDataset(jpegData, detections)
+		}
 	}
+}
+
+// saveToTrainingDataset menyimpan foto bersih dan anotasi label YOLO ke folder dataset secara otomatis
+func (sp *StreamProcessor) saveToTrainingDataset(cleanJPEG []byte, detections []AIDetection) {
+	if len(detections) == 0 {
+		return
+	}
+
+	// Buat folder dataset tujuan jika belum ada
+	imgDir := filepath.Join("dataset", "images", "train")
+	lblDir := filepath.Join("dataset", "labels", "train")
+	os.MkdirAll(imgDir, 0755)
+	os.MkdirAll(lblDir, 0755)
+
+	// Nama file unik dengan timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	baseName := fmt.Sprintf("auto_cctv_%s_%d", timestamp, time.Now().UnixNano()%1000)
+	
+	imgPath := filepath.Join(imgDir, baseName+".jpg")
+	lblPath := filepath.Join(lblDir, baseName+".txt")
+
+	// Decode dimensi gambar asli untuk koordinat normalisasi YOLO
+	imgConfig, _, errConfig := image.DecodeConfig(bytes.NewReader(cleanJPEG))
+	if errConfig != nil {
+		log.Printf("[Auto-Dataset] Gagal membaca dimensi gambar asli: %v", errConfig)
+		return
+	}
+	width := float64(imgConfig.Width)
+	height := float64(imgConfig.Height)
+
+	if width <= 0 || height <= 0 {
+		log.Printf("[Auto-Dataset] Dimensi gambar tidak valid: %f x %f", width, height)
+		return
+	}
+
+	var txtLines []string
+	for _, det := range detections {
+		if len(det.Box) < 4 {
+			continue
+		}
+
+		// Saring berdasarkan threshold kepercayaan
+		if det.Confidence < sp.confThreshold {
+			continue
+		}
+
+		// Konversi koordinat absolut piksel ke koordinat pusat + rasio YOLO (0.0 s.d 1.0)
+		x1, y1 := det.Box[0], det.Box[1]
+		x2, y2 := det.Box[2], det.Box[3]
+
+		// Batasi ke dimensi gambar
+		if x1 < 0 { x1 = 0 }
+		if y1 < 0 { y1 = 0 }
+		if x2 > width { x2 = width }
+		if y2 > height { y2 = height }
+
+		wBox := x2 - x1
+		hBox := y2 - y1
+
+		xCenter := (x1 + x2) / 2 / width
+		yCenter := (y1 + y2) / 2 / height
+		wRatio := wBox / width
+		hRatio := hBox / height
+
+		// Petakan nama label ke Class ID dataset
+		labelTrimmed := strings.TrimSpace(det.Label)
+		if labelTrimmed == "person" {
+			labelTrimmed = "manusia"
+		} else if labelTrimmed == "fire" {
+			labelTrimmed = "api"
+		} else if labelTrimmed == "smoke" {
+			labelTrimmed = "asap"
+		}
+
+		classID, err := getOrAddClassID(labelTrimmed)
+		if err != nil {
+			log.Printf("[Auto-Dataset] Gagal memetakan kelas '%s': %v", labelTrimmed, err)
+			continue
+		}
+
+		line := fmt.Sprintf("%d %.6f %.6f %.6f %.6f", classID, xCenter, yCenter, wRatio, hRatio)
+		txtLines = append(txtLines, line)
+	}
+
+	// Jika tidak ada deteksi yang valid setelah disaring threshold, tidak perlu disimpan
+	if len(txtLines) == 0 {
+		return
+	}
+
+	// Simpan gambar bersih
+	err := os.WriteFile(imgPath, cleanJPEG, 0644)
+	if err != nil {
+		log.Printf("[Auto-Dataset] Gagal menyimpan file gambar latihan: %v", err)
+		return
+	}
+
+	// Simpan file label koordinat YOLO
+	txtContent := strings.Join(txtLines, "\n") + "\n"
+	err = os.WriteFile(lblPath, []byte(txtContent), 0644)
+	if err != nil {
+		log.Printf("[Auto-Dataset] Gagal menyimpan file label latihan: %v", err)
+		os.Remove(imgPath) // hapus gambar jika teks gagal disimpan
+		return
+	}
+
+	log.Printf("[Auto-Dataset] DATASET BERTAMBAH OTOMATIS! Gambar & label tersimpan: %s", baseName)
 }
 
 
