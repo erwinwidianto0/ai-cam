@@ -342,8 +342,27 @@ func (sp *StreamProcessor) Start() {
 						}(jpegData)
 					}
 
+					// Jika ada alarm aktif (kebakaran, merokok, tidur) atau aktivitas memasak sedang berjalan, 
+					// lakukan pemantauan berkala ke VLM setiap 20 detik agar alarm bisa mati secara otomatis jika kondisi sudah kembali aman.
+					sp.statusMu.Lock()
+					hasActiveAlert := sp.geminiFireAlert || sp.geminiSmokingAlert || sp.geminiSleepingAlert || sp.isCooking
+					sp.statusMu.Unlock()
 
+					sp.geminiBusyMu.Lock()
+					gBusy := sp.geminiBusy
+					sp.geminiBusyMu.Unlock()
 
+					hasAPIKey := false
+					if sp.vlmProvider == "openai" {
+						hasAPIKey = (sp.openaiAPIKey != "")
+					} else {
+						hasAPIKey = (sp.geminiAPIKey != "")
+					}
+
+					if hasAPIKey && hasActiveAlert && !gBusy && time.Since(sp.geminiLastCheck) >= 20*time.Second {
+						sp.geminiLastCheck = time.Now()
+						go sp.callVLMAPI(jpegData)
+					}
 					// Salin deteksi terakhir untuk digambar pada frame ini
 					sp.detectionsMu.Lock()
 					var detections []AIDetection
