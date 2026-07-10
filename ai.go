@@ -16,6 +16,7 @@ type AIDetection struct {
 	Label      string    `json:"label"`
 	Confidence float64   `json:"confidence"`
 	Box        []float64 `json:"box"` // [x1, y1, x2, y2]
+	TrackID    *int      `json:"track_id,omitempty"`
 }
 
 // AIResponse merepresentasikan payload respons dari API Python

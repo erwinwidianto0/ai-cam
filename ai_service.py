@@ -58,8 +58,12 @@ async def detect(file: bytes = File(...)):
         # Baca gambar dari byte raw JPEG
         image = Image.open(io.BytesIO(file))
         
-        # 1. Jalankan inferensi YOLOv8 untuk manusia/objek standar (menggunakan base model COCO yang super akurat)
-        results_person = model_person(image, verbose=False)
+        # 1. Jalankan inferensi YOLOv8 dengan ByteTrack (Object Tracking) untuk melacak objek secara kontinu
+        try:
+            results_person = model_person.track(image, persist=True, tracker="bytetrack.yaml", verbose=False)
+        except Exception as e_track:
+            print(f"Tracking failed, falling back to standard detection: {e_track}")
+            results_person = model_person(image, verbose=False)
         
         # 2. Jalankan inferensi YOLOv8 untuk api/asap
         results_fire = model_fire(image, verbose=False)
@@ -113,16 +117,27 @@ async def detect(file: bytes = File(...)):
                 mapped_label = COCO_TRANSLATION.get(label, label)
                 confidence = float(box.conf[0])
                 x1, y1, x2, y2 = map(float, box.xyxy[0])
-                detections.append({
+                
+                det_item = {
                     "class": cls_id,
                     "label": mapped_label,
                     "confidence": confidence,
                     "box": [x1, y1, x2, y2]
-                })
+                }
+                
+                # Tambahkan ID tracking unik jika objek dilacak
+                if box.id is not None:
+                    det_item["track_id"] = int(box.id[0])
+                    
+                detections.append(det_item)
                     
         # 2. Jalankan inferensi model kustom jika terpasang (untuk kelas kustom unik Anda)
         if model_custom is not None:
-            results_custom = model_custom(image, verbose=False)
+            try:
+                results_custom = model_custom.track(image, persist=True, tracker="bytetrack.yaml", verbose=False)
+            except Exception as e_custom_track:
+                results_custom = model_custom(image, verbose=False)
+                
             for result in results_custom:
                 boxes = result.boxes
                 for box in boxes:
@@ -139,12 +154,19 @@ async def detect(file: bytes = File(...)):
                             
                         confidence = float(box.conf[0])
                         x1, y1, x2, y2 = map(float, box.xyxy[0])
-                        detections.append({
+                        
+                        det_item = {
                             "class": cls_id + 200, # Offset agar unik
                             "label": mapped_label,
                             "confidence": confidence,
                             "box": [x1, y1, x2, y2]
-                        })
+                        }
+                        
+                        # Tambahkan ID tracking unik jika objek dilacak
+                        if box.id is not None:
+                            det_item["track_id"] = int(box.id[0])
+                            
+                        detections.append(det_item)
                         
         # 3. Proses deteksi api/asap dari model khusus fire/smoke
         for result in results_fire:

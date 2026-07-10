@@ -1063,7 +1063,12 @@
                             labelName = det.label.charAt(0).toUpperCase() + det.label.slice(1);
                         }
 
-                        labelSpan.textContent = `${labelName} ${Math.round(det.confidence * 100)}%`;
+                        let trackSuffix = '';
+                        if (det.track_id !== undefined && det.track_id !== null) {
+                            trackSuffix = ` #${det.track_id}`;
+                        }
+
+                        labelSpan.textContent = `${labelName}${trackSuffix} ${Math.round(det.confidence * 100)}%`;
                         boxDiv.appendChild(labelSpan);
                         boxesLayer.appendChild(boxDiv);
                     });
