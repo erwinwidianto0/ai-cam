@@ -32,6 +32,8 @@ type Config struct {
 	ZoneXMax           float64 `json:"zone_x_max"`
 	ZoneYMax           float64 `json:"zone_y_max"`
 	CookingTriggerSecs int     `json:"cooking_trigger_secs"`
+	VLMProvider        string  `json:"vlm_provider"` // "gemini" atau "openai"
+	OpenAIAPIKey       string  `json:"openai_api_key"`
 	GeminiAPIKey       string  `json:"gemini_api_key"`
 	GeminiPrompt       string  `json:"gemini_prompt"`
 }
@@ -69,6 +71,8 @@ func loadConfig() error {
 			ZoneXMax:           0.70,
 			ZoneYMax:           0.90,
 			CookingTriggerSecs: 8, // 8 detik berada di kompor untuk memicu deteksi memasak
+			VLMProvider:        "gemini",
+			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
 			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia).",
 		}
@@ -178,6 +182,8 @@ func main() {
 		config.ZoneXMax,
 		config.ZoneYMax,
 		config.CookingTriggerSecs,
+		config.VLMProvider,
+		config.OpenAIAPIKey,
 		config.GeminiAPIKey,
 		config.GeminiPrompt,
 	)
@@ -198,6 +204,7 @@ func main() {
 	http.HandleFunc("/api/stats", handleAPIStats)
 	http.HandleFunc("/api/settings", handleAPISettings)
 	http.HandleFunc("/api/settings/test-gemini", handleAPITestGemini)
+	http.HandleFunc("/api/settings/test-openai", handleAPITestOpenAI)
 
 	// API Pelabelan dan Pelatihan Lokal
 	http.HandleFunc("/api/label/images", handleAPILabelImages)
@@ -402,6 +409,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 		oldZXMax := config.ZoneXMax
 		oldZYMax := config.ZoneYMax
 		oldTriggerSecs := config.CookingTriggerSecs
+		oldVLMProvider := config.VLMProvider
+		oldOpenAIAPIKey := config.OpenAIAPIKey
 		oldGeminiAPIKey := config.GeminiAPIKey
 		oldGeminiPrompt := config.GeminiPrompt
 		currentPort := config.Port // Ambil port aktif
@@ -424,6 +433,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 			oldZXMax != newCfg.ZoneXMax ||
 			oldZYMax != newCfg.ZoneYMax ||
 			oldTriggerSecs != newCfg.CookingTriggerSecs ||
+			oldVLMProvider != newCfg.VLMProvider ||
+			oldOpenAIAPIKey != newCfg.OpenAIAPIKey ||
 			oldGeminiAPIKey != newCfg.GeminiAPIKey ||
 			oldGeminiPrompt != newCfg.GeminiPrompt {
 			
@@ -443,6 +454,8 @@ func handleAPISettings(w http.ResponseWriter, r *http.Request) {
 				newCfg.ZoneXMax,
 				newCfg.ZoneYMax,
 				newCfg.CookingTriggerSecs,
+				newCfg.VLMProvider,
+				newCfg.OpenAIAPIKey,
 				newCfg.GeminiAPIKey,
 				newCfg.GeminiPrompt,
 			)
@@ -1261,25 +1274,36 @@ func handleAPILabelAutoDetect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cek apakah Gemini API Key dikonfigurasi
+	// Cek provider VLM aktif
 	configMu.RLock()
-	apiKey := config.GeminiAPIKey
+	vlmProvider := config.VLMProvider
+	geminiKey := config.GeminiAPIKey
+	openAIKey := config.OpenAIAPIKey
 	configMu.RUnlock()
 
 	var detections []AIDetection
+	var errVLM error
+	vlmUsed := false
 
-	if apiKey != "" {
-		// Gunakan Gemini Cloud VLM untuk hasil auto-labeling yang cerdas
-		var errGemini error
-		detections, errGemini = detectObjectsWithGemini(imgBytes, apiKey)
-		if errGemini != nil {
-			log.Printf("Gagal auto-labeling via Gemini, mencoba fallback ke model YOLO lokal: %v", errGemini)
-			// Jika gagal (timeout, dll), coba fallback ke deteksi lokal agar tetap jalan
-			apiKey = ""
+	if vlmProvider == "openai" && openAIKey != "" {
+		// Gunakan OpenAI Cloud VLM untuk auto-labeling cerdas
+		detections, errVLM = detectObjectsWithOpenAI(imgBytes, openAIKey)
+		if errVLM == nil {
+			vlmUsed = true
+		} else {
+			log.Printf("Gagal auto-labeling via OpenAI, mencoba fallback ke model YOLO lokal: %v", errVLM)
+		}
+	} else if (vlmProvider == "gemini" || vlmProvider == "") && geminiKey != "" {
+		// Gunakan Gemini Cloud VLM untuk auto-labeling cerdas
+		detections, errVLM = detectObjectsWithGemini(imgBytes, geminiKey)
+		if errVLM == nil {
+			vlmUsed = true
+		} else {
+			log.Printf("Gagal auto-labeling via Gemini, mencoba fallback ke model YOLO lokal: %v", errVLM)
 		}
 	}
 
-	if apiKey == "" {
+	if !vlmUsed {
 		// Fallback ke deteksi lokal YOLOv8
 		processorMu.Lock()
 		if streamProcessor == nil || streamProcessor.aiClient == nil {
@@ -1305,4 +1329,206 @@ func handleAPILabelAutoDetect(w http.ResponseWriter, r *http.Request) {
 		"status":     "success",
 		"detections": detections,
 	})
+}
+
+// handleAPITestOpenAI memvalidasi API Key OpenAI ke server OpenAI secara langsung dengan query ringan
+func handleAPITestOpenAI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"status": "error", "message": "Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		OpenAIAPIKey string `json:"openai_api_key"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&reqBody)
+	if err != nil || reqBody.OpenAIAPIKey == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "API Key tidak boleh kosong"})
+		return
+	}
+
+	// Payload request ringan hanya kirim teks pendek untuk verifikasi validitas key
+	testPayloadClean := map[string]interface{}{
+		"model": "gpt-4o-mini",
+		"messages": []map[string]interface{}{
+			{
+				"role":    "user",
+				"content": "Hello! Reply with YES if this API key works.",
+			},
+		},
+		"max_tokens": 5,
+	}
+
+	jsonBytes, err := json.Marshal(testPayloadClean)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal menyusun payload: %v", err)})
+		return
+	}
+
+	url := "https://api.openai.com/v1/chat/completions"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal inisialisasi request HTTP: %v", err)})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", reqBody.OpenAIAPIKey))
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": fmt.Sprintf("Gagal terhubung ke OpenAI API (%v)", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("Kunci API tidak valid (Status HTTP %d)", resp.StatusCode),
+		})
+		return
+	}
+
+	// Jika status 200 OK, berarti kunci API valid!
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Koneksi sukses! API Key Valid.",
+	})
+}
+
+// detectObjectsWithOpenAI memanggil API OpenAI (gpt-4o-mini) untuk mendeteksi objek 2D secara cerdas
+func detectObjectsWithOpenAI(imgBytes []byte, apiKey string) ([]AIDetection, error) {
+	// Encode gambar ke Base64
+	base64Data := base64.StdEncoding.EncodeToString(imgBytes)
+
+	prompt := `Identifikasi dan deteksi objek di dalam gambar ini. 
+Deteksi secara akurat objek-objek berikut jika ada: 'manusia' (person), 'mobil' (car), 'motor' (motorcycle), 'api' (fire), 'asap' (smoke), 'pemadam api' (fire extinguisher). 
+
+Kembalikan hasil dalam format JSON terstruktur berbentuk array objek. Pastikan koordinat kotak pembatas (bounding box) berada dalam skala persentase normalisasi float dari 0.0 sampai 1.0 (di mana 0.0 adalah ujung kiri/atas, dan 1.0 adalah ujung kanan/bawah). 
+Gunakan key koordinat "box" dengan format array: [x_min, y_min, x_max, y_max].
+Tambahkan estimasi tingkat kepercayaan key "confidence" dari 0.0 sampai 1.0.
+Jangan sertakan teks penjelasan lain atau wrapper markdown selain JSON yang valid.
+
+Contoh format JSON yang diharapkan:
+[
+  {
+    "label": "manusia",
+    "box": [0.15, 0.20, 0.45, 0.85],
+    "confidence": 0.95
+  }
+]`
+
+	// Payload request
+	reqPayload := OpenAIRequest{
+		Model: "gpt-4o-mini",
+		Messages: []OpenAIMessage{
+			{
+				Role: "user",
+				Content: []OpenAIContent{
+					{
+						Type: "text",
+						Text: prompt,
+					},
+					{
+						Type: "image_url",
+						ImageURL: &OpenAIImageURL{
+							URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Data),
+						},
+					},
+				},
+			},
+		},
+		ResponseFormat: &OpenAIRespFmt{
+			Type: "json_object",
+		},
+	}
+
+	jsonBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal OpenAI request: %w", err)
+	}
+
+	url := "https://api.openai.com/v1/chat/completions"
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call OpenAI API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("OpenAI API error (%d): %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var openAIResp OpenAIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&openAIResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(openAIResp.Choices) == 0 {
+		return nil, fmt.Errorf("empty response choices")
+	}
+
+	rawText := openAIResp.Choices[0].Message.Content
+	cleanJSON := sanitizeJSON(rawText)
+
+	var geminiDetections []GeminiAutoLabelResult
+	if err := json.Unmarshal([]byte(cleanJSON), &geminiDetections); err != nil {
+		return nil, fmt.Errorf("failed to parse detections JSON: %w", err)
+	}
+
+	// Dapatkan dimensi asli gambar
+	imgReader := bytes.NewReader(imgBytes)
+	imgConfig, _, errConfig := image.DecodeConfig(imgReader)
+	if errConfig != nil {
+		return nil, fmt.Errorf("failed to read image dimensions: %w", errConfig)
+	}
+	width := float64(imgConfig.Width)
+	height := float64(imgConfig.Height)
+
+	var detections []AIDetection
+	for _, gd := range geminiDetections {
+		if len(gd.Box) < 4 {
+			continue
+		}
+		
+		x1 := gd.Box[0] * width
+		y1 := gd.Box[1] * height
+		x2 := gd.Box[2] * width
+		y2 := gd.Box[3] * height
+
+		label := gd.Label
+		if label == "manusia" {
+			label = "person"
+		} else if label == "api" {
+			label = "fire"
+		} else if label == "asap" {
+			label = "smoke"
+		}
+
+		detections = append(detections, AIDetection{
+			Class:      0,
+			Label:      label,
+			Confidence: gd.Confidence,
+			Box:        []float64{x1, y1, x2, y2},
+		})
+	}
+
+	return detections, nil
 }

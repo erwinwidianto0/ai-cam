@@ -342,21 +342,46 @@
                     <small>Jumlah detik orang berdiri di dalam area untuk mengonfirmasi sedang memasak.</small>
                 </div>
 
-                <h3 class="settings-subtitle">Integrasi Cloud Gemini Hybrid AI</h3>
-                <p class="settings-desc">Koneksikan Google Gemini API untuk menganalisis kejadian kompleks secara kognitif seperti mendeteksi api, asap, atau aktivitas dapur lainnya.</p>
+                <h3 class="settings-subtitle">Integrasi Cloud Hybrid AI (VLM)</h3>
+                <p class="settings-desc">Koneksikan API Google Gemini atau OpenAI untuk analisis kognitif tingkat lanjut (mendeteksi api, asap, atau aktivitas kompleks lainnya).</p>
 
                 <div class="form-group">
-                    <label for="gemini-api-key">Gemini API Key (Google AI Studio)</label>
-                    <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Masukkan Kunci API Gemini Anda">
-                    <small>Dapatkan gratis di aistudio.google.com. Kosongkan untuk menonaktifkan.</small>
-                    <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px;">
-                        <button type="button" class="btn btn-secondary" id="btn-test-gemini" style="padding: 6px 12px; font-size: 12px; height: auto; width: auto; border-radius: 6px; line-height: 1.2; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Uji Koneksi API Key</button>
-                        <span id="test-gemini-status" style="font-size: 12px; font-weight: 500;"></span>
+                    <label for="vlm-provider">Pilih Provider Cloud AI</label>
+                    <select id="vlm-provider" name="vlm_provider" onchange="toggleVLMSettings(this.value)">
+                        <option value="gemini">Google Gemini (Model: gemini-2.5-flash)</option>
+                        <option value="openai">OpenAI (Model: gpt-4o-mini)</option>
+                    </select>
+                </div>
+
+                <!-- Group Pengaturan Gemini -->
+                <div id="gemini-settings-group" class="settings-provider-group">
+                    <div class="form-group">
+                        <label for="gemini-api-key">Gemini API Key</label>
+                        <input type="password" id="gemini-api-key" name="gemini_api_key" placeholder="Masukkan Kunci API Gemini Anda">
+                        <small>Dapatkan gratis di <a href="https://aistudio.google.com/" target="_blank" style="color: var(--color-primary);">aistudio.google.com</a>. Kosongkan untuk menonaktifkan.</small>
+                        <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                            <button type="button" class="btn btn-secondary" id="btn-test-gemini" style="padding: 6px 12px; font-size: 12px; height: auto; width: auto; border-radius: 6px; line-height: 1.2; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Uji Koneksi Gemini</button>
+                            <span id="test-gemini-status" style="font-size: 12px; font-weight: 500;"></span>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Group Pengaturan OpenAI -->
+                <div id="openai-settings-group" class="settings-provider-group" style="display: none;">
+                    <div class="form-group">
+                        <label for="openai-api-key">OpenAI API Key</label>
+                        <input type="password" id="openai-api-key" name="openai_api_key" placeholder="Masukkan Kunci API OpenAI (sk-...)">
+                        <small>Kunci API berbayar dari platform OpenAI. Kosongkan untuk menonaktifkan.</small>
+                        <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                            <button type="button" class="btn btn-secondary" id="btn-test-openai" style="padding: 6px 12px; font-size: 12px; height: auto; width: auto; border-radius: 6px; line-height: 1.2; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">Uji Koneksi OpenAI</button>
+                            <span id="test-openai-status" style="font-size: 12px; font-weight: 500;"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="gemini-prompt">AI Prompt / Teks Instruksi Kustom</label>
-                    <textarea id="gemini-prompt" name="gemini_prompt" rows="5" placeholder="Tulis instruksi analisis kognitif Anda untuk Gemini..."></textarea>
+                    <textarea id="gemini-prompt" name="gemini_prompt" rows="5" placeholder="Tulis instruksi analisis kognitif Anda untuk VLM..."></textarea>
                     <small>Pastikan prompt menginstruksikan format JSON output dengan key: 'cooking' (bool), 'fire' (bool), dan 'description' (string).</small>
                 </div>
                 
@@ -587,8 +612,15 @@
                 document.getElementById('zone-x-max').value = data.zone_x_max;
                 document.getElementById('zone-y-max').value = data.zone_y_max;
                 document.getElementById('cooking-trigger-secs').value = data.cooking_trigger_secs;
+                
+                const vlmProvider = data.vlm_provider || "gemini";
+                document.getElementById('vlm-provider').value = vlmProvider;
                 document.getElementById('gemini-api-key').value = data.gemini_api_key || "";
+                document.getElementById('openai-api-key').value = data.openai_api_key || "";
                 document.getElementById('gemini-prompt').value = data.gemini_prompt || "";
+
+                // Toggle tampilan input key sesuai provider terpilih
+                toggleVLMSettings(vlmProvider);
 
                 // Update overlay pratinjau
                 updateROIOverlay();
@@ -610,7 +642,9 @@
                 zone_x_max: parseFloat(formData.get('zone_x_max')),
                 zone_y_max: parseFloat(formData.get('zone_y_max')),
                 cooking_trigger_secs: parseInt(formData.get('cooking_trigger_secs')),
+                vlm_provider: formData.get('vlm_provider'),
                 gemini_api_key: formData.get('gemini_api_key'),
+                openai_api_key: formData.get('openai_api_key'),
                 gemini_prompt: formData.get('gemini_prompt')
             };
 
@@ -673,9 +707,64 @@
                 testGeminiStatus.style.color = "var(--color-red)";
             } finally {
                 btnTestGemini.disabled = false;
-                btnTestGemini.textContent = "Uji Koneksi API Key";
+                btnTestGemini.textContent = "Uji Koneksi Gemini";
             }
         });
+
+        // Menguji Validitas Kunci API OpenAI
+        const btnTestOpenAI = document.getElementById('btn-test-openai');
+        const testOpenAIStatus = document.getElementById('test-openai-status');
+
+        btnTestOpenAI.addEventListener('click', async () => {
+            const apiKey = document.getElementById('openai-api-key').value.trim();
+            if (!apiKey) {
+                testOpenAIStatus.textContent = "Masukkan API Key terlebih dahulu!";
+                testOpenAIStatus.style.color = "var(--color-yellow)";
+                return;
+            }
+
+            btnTestOpenAI.disabled = true;
+            btnTestOpenAI.textContent = "Menguji...";
+            testOpenAIStatus.textContent = "Menghubungi OpenAI...";
+            testOpenAIStatus.style.color = "var(--text-secondary)";
+
+            try {
+                const response = await fetch('/api/settings/test-openai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ openai_api_key: apiKey })
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    testOpenAIStatus.textContent = "✓ API Key Valid & Koneksi Sukses!";
+                    testOpenAIStatus.style.color = "var(--color-green)";
+                } else {
+                    testOpenAIStatus.textContent = "✗ " + (result.message || "Gagal terhubung.");
+                    testOpenAIStatus.style.color = "var(--color-red)";
+                }
+            } catch (err) {
+                console.error("Gagal menguji OpenAI API Key: ", err);
+                testOpenAIStatus.textContent = "✗ Kesalahan koneksi lokal.";
+                testOpenAIStatus.style.color = "var(--color-red)";
+            } finally {
+                btnTestOpenAI.disabled = false;
+                btnTestOpenAI.textContent = "Uji Koneksi OpenAI";
+            }
+        });
+
+        // Helper fungsi toggle tampilan provider VLM
+        window.toggleVLMSettings = function(val) {
+            const geminiGroup = document.getElementById('gemini-settings-group');
+            const openaiGroup = document.getElementById('openai-settings-group');
+            if (val === 'openai') {
+                geminiGroup.style.display = 'none';
+                openaiGroup.style.display = 'block';
+            } else {
+                geminiGroup.style.display = 'block';
+                openaiGroup.style.display = 'none';
+            }
+        };
 
         // Mengambil Statistik Terkini
         async function fetchStats() {
