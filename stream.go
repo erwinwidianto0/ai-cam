@@ -437,6 +437,7 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 	colorYellow := color.RGBA{R: 245, G: 158, B: 11, A: 255} // Kuning
 	colorBlue := color.RGBA{R: 59, G: 130, B: 246, A: 255}   // Biru
 
+	localPersonDetected := false
 	localFireDetected := false
 	localSmokeDetected := false
 
@@ -465,6 +466,7 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 		var labelText string
 
 		if isPerson {
+			localPersonDetected = true
 			boxColor = colorRed
 			confPercent := int(det.Confidence * 100)
 			labelText = fmt.Sprintf("Manusia %d%%", confPercent)
@@ -536,11 +538,18 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 			log.Println("WARNING!!! DETEKSI BAHAYA LOKAL AKTIF!")
 			go sp.saveFireSnapshot(jpegData)
 		}
-	} else if sp.geminiAPIKey == "" {
-		// Hanya matikan alarm secara otomatis jika Gemini nonaktif (agar tidak menimpa status Gemini jika aktif)
+	} else {
 		if sp.geminiFireAlert {
 			sp.geminiFireAlert = false
-			sp.geminiDescription = "Sistem lokal berjalan normal. Tidak terdeteksi manusia, api, atau asap."
+		}
+		
+		if sp.geminiAPIKey == "" {
+			// Perbarui deskripsi secara dinamis berdasarkan deteksi manusia lokal
+			if localPersonDetected {
+				sp.geminiDescription = "Sistem lokal berjalan normal. Terdeteksi manusia, area aman dari api dan asap."
+			} else {
+				sp.geminiDescription = "Sistem lokal berjalan normal. Area aman (tidak terdeteksi manusia, api, atau asap)."
+			}
 		}
 	}
 	sp.statusMu.Unlock()

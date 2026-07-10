@@ -330,6 +330,10 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	geminiDescription := streamProcessor.geminiDescription
 	processorMu.Unlock()
 
+	configMu.RLock()
+	geminiActive := config.GeminiAPIKey != ""
+	configMu.RUnlock()
+
 	response := map[string]interface{}{
 		"total_detections":     dbStats.TotalDetections,
 		"detections_today":     dbStats.DetectionsToday,
@@ -342,6 +346,7 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		"gemini_fire_alert":    geminiFireAlert,
 		"gemini_cooking_alert": geminiCookingAlert,
 		"gemini_description":   geminiDescription,
+		"gemini_active":        geminiActive,
 		"timestamp":            time.Now().Format("15:04:05"),
 	}
 

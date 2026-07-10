@@ -728,12 +728,12 @@
                 const geminiDescriptionText = document.getElementById('gemini-description-text');
 
                 // Update Deskripsi Gemini
-                if (data.gemini_description) {
+                if (data.gemini_active) {
                     geminiDescriptionText.textContent = data.gemini_description;
                     geminiActiveBadge.textContent = "API AKTIF";
                     geminiActiveBadge.className = "header-action-badge alert-active";
                 } else {
-                    geminiDescriptionText.textContent = "Menunggu analisis kognitif pertama dari Google Gemini API. Pastikan Anda telah memasukkan Gemini API Key di menu pengaturan.";
+                    geminiDescriptionText.textContent = "Analisis kognitif Google Gemini VLM dinonaktifkan secara cloud. (Layanan berjalan secara LOKAL sepenuhnya. Silakan masukkan Gemini API Key di menu pengaturan jika ingin mengaktifkan analisis kognitif cloud).";
                     geminiActiveBadge.textContent = "CLOUD OFFLINE";
                     geminiActiveBadge.className = "header-action-badge alert-idle";
                 }
