@@ -11,14 +11,20 @@ app = FastAPI(title="YOLOv8 Inference Service", description="Local AI service fo
 
 from huggingface_hub import hf_hub_download
 
-# Memuat model (yolo26n.pt (YOLO26) untuk manusia, rabahdev/fire-smoke-yolov8n untuk api/asap)
+# Memuat model secara Hybrid (Base Model COCO + Custom Model + Fire/Smoke Model)
 try:
-    print("Loading YOLO26 person model...")
-    model_path = "custom_model.pt" if os.path.exists("custom_model.pt") else "yolo26n.pt"
-    print(f"Using person model path: {model_path}")
-    model_person = YOLO(model_path)
-    print("YOLO26 person model loaded successfully.")
+    print("Loading YOLO26 base model...")
+    model_person = YOLO("yolo26n.pt")
+    print("YOLO26 base model loaded successfully.")
     
+    model_custom = None
+    if os.path.exists("custom_model.pt"):
+        print("Loading custom model...")
+        model_custom = YOLO("custom_model.pt")
+        print("Custom model loaded successfully.")
+    else:
+        print("Custom model not found. Using base model only.")
+        
     print("Downloading/Loading YOLOv8 fire/smoke model from Hugging Face...")
     fire_ckpt = hf_hub_download(repo_id="rabahdev/fire-smoke-yolov8n", filename="best.pt")
     model_fire = YOLO(fire_ckpt)
@@ -37,33 +43,30 @@ async def detect(file: bytes = File(...)):
         # Baca gambar dari byte raw JPEG
         image = Image.open(io.BytesIO(file))
         
-        # Jalankan inferensi YOLOv8 untuk manusia
+        # 1. Jalankan inferensi YOLOv8 untuk manusia/objek standar (menggunakan base model COCO yang super akurat)
         results_person = model_person(image, verbose=False)
         
-        # Jalankan inferensi YOLOv8 untuk api/asap
+        # 2. Jalankan inferensi YOLOv8 untuk api/asap
         results_fire = model_fire(image, verbose=False)
         
         detections = []
         
-        # 1. Proses deteksi manusia / kelas kustom lainnya
-        is_custom = (model_path == "custom_model.pt")
+        # 1. Proses deteksi objek standar (person/car/motorcycle) dari base model
         for result in results_person:
             boxes = result.boxes
             for box in boxes:
                 cls_id = int(box.cls[0])
                 label = model_person.names[cls_id]
                 
-                # Jika menggunakan model kustom, loloskan semua kelas kustomnya.
-                # Jika menggunakan model standar, hanya loloskan "person".
-                if is_custom or label == "person":
-                    # Standarisasi nama label bahasa Indonesia ke bahasa Inggris agar dikenali oleh Go
+                # Gunakan model COCO untuk mendeteksi manusia, mobil, dan motor demi akurasi tinggi
+                if label in ["person", "car", "motorcycle"]:
                     mapped_label = label
-                    if label == "manusia":
-                        mapped_label = "person"
-                    elif label == "api":
-                        mapped_label = "fire"
-                    elif label == "asap":
-                        mapped_label = "smoke"
+                    if label == "car":
+                        mapped_label = "mobil"
+                    elif label == "motorcycle":
+                        mapped_label = "motor"
+                    elif label == "person":
+                        mapped_label = "person" # Go mengharapkan label "person"
                         
                     confidence = float(box.conf[0])
                     x1, y1, x2, y2 = map(float, box.xyxy[0])
@@ -74,7 +77,33 @@ async def detect(file: bytes = File(...)):
                         "box": [x1, y1, x2, y2]
                     })
                     
-        # 2. Proses deteksi api/asap
+        # 2. Jalankan inferensi model kustom jika terpasang (untuk kelas kustom unik Anda)
+        if model_custom is not None:
+            results_custom = model_custom(image, verbose=False)
+            for result in results_custom:
+                boxes = result.boxes
+                for box in boxes:
+                    cls_id = int(box.cls[0])
+                    label = model_custom.names[cls_id]
+                    
+                    # Hanya ambil kelas kustom baru, lewati manusia/mobil/motor agar tidak duplikasi
+                    if label not in ["manusia", "mobil", "motor"]:
+                        mapped_label = label
+                        if label == "api":
+                            mapped_label = "fire"
+                        elif label == "asap":
+                            mapped_label = "smoke"
+                            
+                        confidence = float(box.conf[0])
+                        x1, y1, x2, y2 = map(float, box.xyxy[0])
+                        detections.append({
+                            "class": cls_id + 200, # Offset agar unik
+                            "label": mapped_label,
+                            "confidence": confidence,
+                            "box": [x1, y1, x2, y2]
+                        })
+                        
+        # 3. Proses deteksi api/asap dari model khusus fire/smoke
         for result in results_fire:
             boxes = result.boxes
             for box in boxes:
