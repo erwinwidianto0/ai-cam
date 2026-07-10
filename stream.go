@@ -308,12 +308,12 @@ func (sp *StreamProcessor) Start() {
 						}(jpegData)
 					}
 
-					// Panggil Google Gemini API kognitif secara asinkron (setiap 7 detik jika sedang tidak sibuk)
+					// Panggil Google Gemini API kognitif secara asinkron (setiap 15 detik jika sedang tidak sibuk)
 					sp.geminiBusyMu.Lock()
 					gBusy := sp.geminiBusy
 					sp.geminiBusyMu.Unlock()
 
-					if sp.geminiAPIKey != "" && now.Sub(sp.geminiLastCheck) >= 7*time.Second && !gBusy {
+					if sp.geminiAPIKey != "" && now.Sub(sp.geminiLastCheck) >= 15*time.Second && !gBusy {
 						sp.geminiLastCheck = now
 						sp.callGeminiAPI(jpegData)
 					}
@@ -806,7 +806,11 @@ func (sp *StreamProcessor) callGeminiAPI(jpegData []byte) {
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			log.Printf("Gemini API mengembalikan status error: %d, Response: %s", resp.StatusCode, string(bodyBytes))
 			sp.statusMu.Lock()
-			sp.geminiDescription = fmt.Sprintf("Error: API mengembalikan kode %d (Periksa validitas Gemini API Key Anda)", resp.StatusCode)
+			if resp.StatusCode == http.StatusTooManyRequests {
+				sp.geminiDescription = "Error: Limit kuota API terlampaui (HTTP 429: Too Many Requests). Menunggu giliran berikutnya secara otomatis..."
+			} else {
+				sp.geminiDescription = fmt.Sprintf("Error: API mengembalikan kode %d (Periksa validitas Gemini API Key Anda)", resp.StatusCode)
+			}
 			sp.statusMu.Unlock()
 			return
 		}
