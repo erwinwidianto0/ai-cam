@@ -1975,9 +1975,6 @@ func (sp *StreamProcessor) saveToTrainingDataset(cleanJPEG []byte, detections []
 	}
 
 	log.Printf("[Auto-Dataset] DATASET BERTAMBAH OTOMATIS! Gambar & label tersimpan: %s", baseName)
-
-	// Cek apakah data baru bertambah kelipatan 10 untuk memicu training otomatis secara asinkron
-	go checkAndTriggerAutoTraining()
 }
 
 // recordAlarmToTrainingDataset secara asinkron memanggil auto-label VLM untuk mendeteksi koordinat objek pada frame alarm,
