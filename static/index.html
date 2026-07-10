@@ -837,9 +837,9 @@
         let rawImages = [];
         let currentImageIndex = 0;
         let drawnBoxes = []; // array of { xMin, yMin, xMax, yMax, label }
-        let isDrawing = false;
-        let startX = 0;
-        let startY = 0;
+        let isLabelingDrawing = false;
+        let labelingStartX = 0;
+        let labelingStartY = 0;
         let activeBoxDiv = null;
 
         // Fetch daftar gambar mentah di dataset/raw
@@ -882,31 +882,31 @@
         // Event listener klik-drag pada draw layer untuk melukis box
         labelingDrawLayer.addEventListener('mousedown', (e) => {
             if (!labelingImage.src || labelingImage.style.display === 'none') return;
-            isDrawing = true;
+            isLabelingDrawing = true;
             
             const rect = labelingDrawLayer.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
+            labelingStartX = e.clientX - rect.left;
+            labelingStartY = e.clientY - rect.top;
 
             // Buat elemen box div sementara
             activeBoxDiv = document.createElement('div');
             activeBoxDiv.className = 'drawn-box-rect';
-            activeBoxDiv.style.left = `${startX}px`;
-            activeBoxDiv.style.top = `${startY}px`;
+            activeBoxDiv.style.left = `${labelingStartX}px`;
+            activeBoxDiv.style.top = `${labelingStartY}px`;
             labelingDrawLayer.appendChild(activeBoxDiv);
         });
 
         labelingDrawLayer.addEventListener('mousemove', (e) => {
-            if (!isDrawing || !activeBoxDiv) return;
+            if (!isLabelingDrawing || !activeBoxDiv) return;
             
             const rect = labelingDrawLayer.getBoundingClientRect();
             const currentX = e.clientX - rect.left;
             const currentY = e.clientY - rect.top;
 
-            const left = Math.min(startX, currentX);
-            const top = Math.min(startY, currentY);
-            const width = Math.abs(startX - currentX);
-            const height = Math.abs(startY - currentY);
+            const left = Math.min(labelingStartX, currentX);
+            const top = Math.min(labelingStartY, currentY);
+            const width = Math.abs(labelingStartX - currentX);
+            const height = Math.abs(labelingStartY - currentY);
 
             activeBoxDiv.style.left = `${left}px`;
             activeBoxDiv.style.top = `${top}px`;
@@ -915,8 +915,8 @@
         });
 
         labelingDrawLayer.addEventListener('mouseup', (e) => {
-            if (!isDrawing) return;
-            isDrawing = false;
+            if (!isLabelingDrawing) return;
+            isLabelingDrawing = false;
 
             if (!activeBoxDiv) return;
             
@@ -924,10 +924,10 @@
             const currentX = e.clientX - rect.left;
             const currentY = e.clientY - rect.top;
 
-            const left = Math.min(startX, currentX);
-            const top = Math.min(startY, currentY);
-            const width = Math.abs(startX - currentX);
-            const height = Math.abs(startY - currentY);
+            const left = Math.min(labelingStartX, currentX);
+            const top = Math.min(labelingStartY, currentY);
+            const width = Math.abs(labelingStartX - currentX);
+            const height = Math.abs(labelingStartY - currentY);
 
             // Jangan simpan jika box terlalu kecil (mencegah klik tidak sengaja)
             if (width < 10 || height < 10) {
