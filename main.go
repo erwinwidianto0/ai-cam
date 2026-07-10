@@ -760,6 +760,27 @@ func handleAPITrainStart(w http.ResponseWriter, r *http.Request) {
 		req.Device = "cpu"
 	}
 
+	// Verifikasi apakah dataset/data.yaml ada
+	if _, err := os.Stat("dataset/data.yaml"); os.IsNotExist(err) {
+		w.WriteHeader(http.StatusOK) // Kembalikan HTTP 200 dengan status error agar ditampilkan di browser
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Gagal memulai pelatihan: Anda belum melabeli gambar apa pun! Silakan buka tab 'AI Labeling Center' dan beri label minimal 1 gambar terlebih dahulu.",
+		})
+		return
+	}
+
+	// Verifikasi apakah folder dataset/images/train memiliki gambar
+	files, err := os.ReadDir("dataset/images/train")
+	if err != nil || len(files) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": "Gagal memulai pelatihan: Folder latihan kosong! Harap masukkan foto di dataset/raw/ dan selesaikan pelabelan di tab 'AI Labeling Center'.",
+		})
+		return
+	}
+
 	os.Remove("snapshots/training.log")
 	os.WriteFile("snapshots/training.log", []byte("Memulai inisialisasi pelatihan...\n"), 0644)
 
@@ -790,7 +811,7 @@ model.train(
 print("TRAINING_COMPLETED_SUCCESSFULLY")
 `, baseModel, baseModel, req.Epochs, pyDevice)
 
-	err := os.WriteFile("train_temp.py", []byte(pyScript), 0644)
+	err = os.WriteFile("train_temp.py", []byte(pyScript), 0644)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": "Gagal membuat script pelatihan"})
