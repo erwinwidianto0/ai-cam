@@ -63,16 +63,18 @@ type StreamProcessor struct {
 	aiBusyMu       sync.Mutex
 
 	// Integrasi Gemini/OpenAI Hybrid AI
-	vlmProvider        string
-	openaiAPIKey       string
-	geminiAPIKey       string
-	geminiPrompt       string
-	geminiDescription  string
-	geminiFireAlert    bool
-	geminiCookingAlert bool
-	geminiLastCheck    time.Time
-	geminiBusy         bool
-	geminiBusyMu       sync.Mutex
+	vlmProvider         string
+	openaiAPIKey        string
+	geminiAPIKey        string
+	geminiPrompt        string
+	geminiDescription   string
+	geminiFireAlert     bool
+	geminiCookingAlert  bool
+	geminiSmokingAlert  bool
+	geminiSleepingAlert bool
+	geminiLastCheck     time.Time
+	geminiBusy          bool
+	geminiBusyMu        sync.Mutex
 }
 
 // NewStreamProcessor membuat instansi baru StreamProcessor
@@ -834,6 +836,8 @@ type GeminiResponse struct {
 type GeminiAnalysisResult struct {
 	Cooking     bool   `json:"cooking"`
 	Fire        bool   `json:"fire"`
+	Smoking     bool   `json:"smoking"`
+	Sleeping    bool   `json:"sleeping"`
 	Description string `json:"description"`
 }
 
@@ -997,6 +1001,13 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 	// Jika terjadi transisi alarm kebakaran (sebelumnya aman sekarang terdeteksi api)
 	fireTriggered := result.Fire && !sp.geminiFireAlert
 	sp.geminiFireAlert = result.Fire
+
+	// Simpan status merokok dan tidur
+	smokingTriggered := result.Smoking && !sp.geminiSmokingAlert
+	sp.geminiSmokingAlert = result.Smoking
+
+	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
+	sp.geminiSleepingAlert = result.Sleeping
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
@@ -1004,6 +1015,18 @@ func (sp *StreamProcessor) executeGeminiAPI(jpegData []byte) {
 		log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI GEMINI: %s", result.Description)
 		// Simpan bukti foto snapshot kebakaran
 		go sp.saveFireSnapshot(jpegData, nil)
+	}
+
+	// Tangani alarm merokok aktif
+	if smokingTriggered {
+		log.Printf("WARNING!!! DETEKSI MEROKOK DARI GEMINI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "smoking")
+	}
+
+	// Tangani alarm tidur aktif
+	if sleepingTriggered {
+		log.Printf("WARNING!!! DETEKSI TIDUR DARI GEMINI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sleeping")
 	}
 }
 
@@ -1112,12 +1135,31 @@ func (sp *StreamProcessor) executeOpenAIAPI(jpegData []byte) {
 	// Jika terjadi transisi alarm kebakaran
 	fireTriggered := result.Fire && !sp.geminiFireAlert
 	sp.geminiFireAlert = result.Fire
+
+	// Simpan status merokok dan tidur
+	smokingTriggered := result.Smoking && !sp.geminiSmokingAlert
+	sp.geminiSmokingAlert = result.Smoking
+
+	sleepingTriggered := result.Sleeping && !sp.geminiSleepingAlert
+	sp.geminiSleepingAlert = result.Sleeping
 	sp.statusMu.Unlock()
 
 	// Tangani alarm kebakaran aktif
 	if fireTriggered {
 		log.Printf("WARNING!!! DETEKSI KEBAKARAN/API DARI OPENAI: %s", result.Description)
 		go sp.saveFireSnapshot(jpegData, nil)
+	}
+
+	// Tangani alarm merokok aktif
+	if smokingTriggered {
+		log.Printf("WARNING!!! DETEKSI MEROKOK DARI OPENAI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "smoking")
+	}
+
+	// Tangani alarm tidur aktif
+	if sleepingTriggered {
+		log.Printf("WARNING!!! DETEKSI TIDUR DARI OPENAI: %s", result.Description)
+		go sp.saveEventSnapshot(jpegData, "sleeping")
 	}
 }
 
@@ -1167,6 +1209,41 @@ func (sp *StreamProcessor) saveFireSnapshot(jpegData []byte, detections []AIDete
 		if len(detections) > 0 {
 			go sp.saveToTrainingDataset(jpegData, detections)
 		}
+	}
+}
+
+// saveEventSnapshot menyimpan bukti foto kejadian kustom (seperti merokok atau tidur) ke disk & log ke SQLite
+func (sp *StreamProcessor) saveEventSnapshot(jpegData []byte, eventType string) {
+	// Ambil frame terkini yang sudah digambar box-nya sebagai barang bukti
+	sp.currentFrameMu.RLock()
+	processedJPEG := make([]byte, len(sp.currentFrame))
+	copy(processedJPEG, sp.currentFrame)
+	sp.currentFrameMu.RUnlock()
+
+	// Fallback jika buffer frame belum siap
+	if len(processedJPEG) == 0 {
+		processedJPEG = jpegData
+	}
+
+	// Nama file unik dengan timestamp
+	snapshotFilename := fmt.Sprintf("%s_%s.jpg", eventType, time.Now().Format("20060102_150405_000"))
+	snapshotPath := filepath.Join("snapshots", snapshotFilename)
+
+	// Pastikan folder snapshots ada
+	os.MkdirAll("snapshots", 0755)
+
+	err := os.WriteFile(snapshotPath, processedJPEG, 0644)
+	if err != nil {
+		log.Printf("Gagal menyimpan file snapshot %s: %v", eventType, err)
+		return
+	}
+
+	// Catat alarm kejadian ke database SQLite
+	_, dbErr := sp.db.LogDetection(eventType, 0.95, snapshotFilename) // Default confidence 95%
+	if dbErr != nil {
+		log.Printf("Gagal mencatat log %s ke SQLite: %v", eventType, dbErr)
+	} else {
+		log.Printf("DARURAT %s TERCATAT! Foto disimpan: %s", strings.ToUpper(eventType), snapshotFilename)
 	}
 }
 

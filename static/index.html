@@ -10,6 +10,58 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Link to custom style -->
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* CSS tambahan untuk Peringatan Sistem */
+        .system-warning-banner {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.25);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+            animation: warningPulse 2s infinite ease-in-out;
+        }
+        @keyframes warningPulse {
+            0% { transform: scale(1); box-shadow: 0 0 15px rgba(239, 68, 68, 0.25); }
+            50% { transform: scale(1.005); box-shadow: 0 0 25px rgba(239, 68, 68, 0.45); }
+            100% { transform: scale(1); box-shadow: 0 0 15px rgba(239, 68, 68, 0.25); }
+        }
+        .warning-icon {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #ef4444;
+            color: #fff;
+            border-radius: 50%;
+            flex-shrink: 0;
+            animation: warningPulseIcon 1s infinite alternate;
+        }
+        @keyframes warningPulseIcon {
+            0% { transform: scale(0.9); }
+            100% { transform: scale(1.1); }
+        }
+        .warning-content {
+            flex-grow: 1;
+        }
+        .warning-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fca5a5;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .warning-desc {
+            font-size: 13px;
+            color: #f3f4f6;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -55,6 +107,11 @@
 
         <!-- Main Dashboard Content -->
         <div id="tab-monitor" class="tab-content active">
+            <!-- System Warnings Bar -->
+            <div id="system-warning-banner" class="system-warning-banner" style="display: none; margin-bottom: 20px;">
+                <!-- Akan diisi secara dinamis oleh JavaScript -->
+            </div>
+            
             <main class="dashboard-grid">
             <!-- Left Side: Live Monitor -->
             <section class="monitor-card card">
@@ -878,6 +935,50 @@
                     fireStatusIcon.className = "stat-icon gray";
                     fireStatusText.textContent = "Nonaktif";
                     fireStatusText.className = "stat-val text-idle";
+                }
+
+                // Update Warnings Banner
+                const warningBanner = document.getElementById('system-warning-banner');
+                let warnings = [];
+                
+                if (data.gemini_fire_alert) {
+                    warnings.push({
+                        title: "DARURAT KEBAKARAN!",
+                        desc: "Terdeteksi indikasi API atau ASAP tebal di area pantauan! Segera periksa!",
+                        icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
+                    });
+                }
+                
+                if (data.gemini_smoking_alert) {
+                    warnings.push({
+                        title: "PELANGGARAN: MEROKOK TERDETEKSI!",
+                        desc: "Terdeteksi aktivitas merokok di dalam ruangan/area larangan! Harap tertib!",
+                        icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>`
+                    });
+                }
+                
+                if (data.gemini_sleeping_alert) {
+                    warnings.push({
+                        title: "PERINGATAN: PETUGAS TERLELAP/TIDUR!",
+                        desc: "Terdeteksi adanya orang sedang tidur di area kerja selama waktu pemantauan!",
+                        icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v16M22 4v16M2 8h20M2 14h20M6 20v-3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3"/></svg>`
+                    });
+                }
+                
+                if (warnings.length > 0) {
+                    warningBanner.style.display = 'flex';
+                    warningBanner.innerHTML = warnings.map((w, index) => `
+                        <div style="display: flex; align-items: center; gap: 15px; width: 100%; ${index < warnings.length - 1 ? 'margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid rgba(239, 68, 68, 0.2);' : ''}">
+                            <div class="warning-icon">${w.icon}</div>
+                            <div class="warning-content">
+                                <div class="warning-title">${w.title}</div>
+                                <div class="warning-desc">${w.desc}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    warningBanner.style.display = 'none';
+                    warningBanner.innerHTML = '';
                 }
             } catch (err) {
                 console.error("Gagal memuat statistik: ", err);

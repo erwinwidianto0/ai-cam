@@ -74,7 +74,7 @@ func loadConfig() error {
 			VLMProvider:        "gemini",
 			OpenAIAPIKey:       "",
 			GeminiAPIKey:       "",
-			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia).",
+			GeminiPrompt:       "Analisis gambar CCTV dapur ini. Deteksi secara akurat: 1) Apakah ada orang sedang memasak di depan kompor (cooking: true/false)? 2) Apakah ada indikasi kebakaran, api, atau asap (fire: true/false)? 3) Apakah ada orang sedang merokok (smoking: true/false)? 4) Apakah ada orang sedang tidur (sleeping: true/false)? Kembalikan hasil dalam format JSON terstruktur dengan key: 'cooking' (boolean), 'fire' (boolean), 'smoking' (boolean), 'sleeping' (boolean), dan 'description' (string penjelasan singkat kondisi kejadian dalam bahasa Indonesia).",
 		}
 		
 		file, err := json.MarshalIndent(config, "", "  ")
@@ -339,6 +339,8 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	// Data baru dari integrasi Gemini VLM
 	geminiFireAlert := streamProcessor.geminiFireAlert
 	geminiCookingAlert := streamProcessor.geminiCookingAlert
+	geminiSmokingAlert := streamProcessor.geminiSmokingAlert
+	geminiSleepingAlert := streamProcessor.geminiSleepingAlert
 	geminiDescription := streamProcessor.geminiDescription
 	processorMu.Unlock()
 
@@ -355,9 +357,11 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		"active_viewers":       clientsCount,
 		"kitchen_status":       kitchenStatus,
 		"seconds_in_zone":      secondsInZone,
-		"gemini_fire_alert":    geminiFireAlert,
-		"gemini_cooking_alert": geminiCookingAlert,
-		"gemini_description":   geminiDescription,
+		"gemini_fire_alert":     geminiFireAlert,
+		"gemini_cooking_alert":  geminiCookingAlert,
+		"gemini_smoking_alert":  geminiSmokingAlert,
+		"gemini_sleeping_alert": geminiSleepingAlert,
+		"gemini_description":    geminiDescription,
 		"gemini_active":        geminiActive,
 		"timestamp":            time.Now().Format("15:04:05"),
 	}
