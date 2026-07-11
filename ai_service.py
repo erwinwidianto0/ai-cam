@@ -69,10 +69,10 @@ async def detect(file: bytes = File(...)):
         
         # 1. Jalankan inferensi YOLOv8 dengan ByteTrack (Object Tracking) untuk melacak objek secara kontinu
         try:
-            results_person = model_person.track(image, persist=True, tracker="bytetrack.yaml", verbose=False)
+            results_person = model_person.track(image, persist=True, tracker="bytetrack.yaml", verbose=False, conf=0.15)
         except Exception as e_track:
             print(f"Tracking failed, falling back to standard detection: {e_track}")
-            results_person = model_person(image, verbose=False)
+            results_person = model_person(image, verbose=False, conf=0.15)
         
         # 2. Jalankan inferensi YOLOv8 untuk api/asap
         results_fire = model_fire(image, verbose=False)
