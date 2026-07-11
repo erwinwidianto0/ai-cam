@@ -400,6 +400,8 @@ func (sp *StreamProcessor) Start() {
 					hasAPIKey := false
 					if sp.vlmProvider == "openai" {
 						hasAPIKey = (sp.openaiAPIKey != "")
+					} else if sp.vlmProvider == "local" {
+						hasAPIKey = true
 					} else {
 						hasAPIKey = (sp.geminiAPIKey != "")
 					}
@@ -754,6 +756,8 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 				hasAPIKey := false
 				if sp.vlmProvider == "openai" {
 					hasAPIKey = (sp.openaiAPIKey != "")
+				} else if sp.vlmProvider == "local" {
+					hasAPIKey = true
 				} else {
 					hasAPIKey = (sp.geminiAPIKey != "")
 				}
@@ -928,6 +932,8 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 			hasAPIKey := false
 			if sp.vlmProvider == "openai" {
 				hasAPIKey = (sp.openaiAPIKey != "")
+			} else if sp.vlmProvider == "local" {
+				hasAPIKey = true
 			} else {
 				hasAPIKey = (sp.geminiAPIKey != "")
 			}
@@ -982,6 +988,8 @@ func (sp *StreamProcessor) drawBoundingBoxes(jpegData []byte, detections []AIDet
 				hasAPIKey := false
 				if sp.vlmProvider == "openai" {
 					hasAPIKey = (sp.openaiAPIKey != "")
+				} else if sp.vlmProvider == "local" {
+					hasAPIKey = true
 				} else {
 					hasAPIKey = (sp.geminiAPIKey != "")
 				}

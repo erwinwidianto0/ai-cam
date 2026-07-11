@@ -6,6 +6,6 @@ python-multipart
 huggingface_hub
 torch
 torchvision
-transformers
+transformers==4.47.1
 einops
 timm
