@@ -250,12 +250,20 @@ async def vlm_local(file: bytes = File(...)):
         
         # Analisis label secara logis (ubah ke lowercase)
         labels_lower = [l.lower() for l in labels]
+        desc_lower = description.lower()
         
-        fire_detected = any("fire" in l or "api" in l or "flame" in l for l in labels_lower)
-        smoke_detected = any("smoke" in l or "asap" in l for l in labels_lower)
-        smoking_detected = any("smoking" in l or "cigarette" in l or "rokok" in l for l in labels_lower)
-        sleeping_detected = any("sleeping" in l or "lying down" in l or "tidur" in l for l in labels_lower)
-        sop_violation_detected = any("mess" in l or "floor" in l or "trash" in l for l in labels_lower)
+        # Deteksi Kebakaran & Asap Hibrida (Grounding + Caption Keywords)
+        fire_detected = any("fire" in l or "api" in l or "flame" in l for l in labels_lower) or any(w in desc_lower for w in ["fire", "kebakaran", "flame", "burning"])
+        smoke_detected = any("smoke" in l or "asap" in l for l in labels_lower) or any(w in desc_lower for w in ["smoke", "asap", "kepulan asap"])
+        
+        # Deteksi Rokok Hibrida (Grounding + Caption Keywords)
+        smoking_detected = any("smoking" in l or "cigarette" in l or "rokok" in l for l in labels_lower) or any(w in desc_lower for w in ["smoking", "cigarette", "rokok", "merokok"])
+        
+        # Deteksi Petugas Tidur Hibrida (Grounding + Caption Keywords)
+        sleeping_detected = any("sleeping" in l or "lying down" in l or "tidur" in l for l in labels_lower) or any(w in desc_lower for w in ["sleeping", "lying down", "tidur", "tertidur", "is asleep"])
+        
+        # Deteksi Pelanggaran SOP Hibrida
+        sop_violation_detected = any("mess" in l or "floor" in l or "trash" in l for l in labels_lower) or any(w in desc_lower for w in ["mess on floor", "trash", "dirty kitchen", "littering", "items on floor"])
         
         # Evaluasi Memasak secara kognitif: manusia berada di dekat kompor/lemari dapur
         cooking_detected = "person" in labels_lower and ("stove" in labels_lower or "kitchen cabinet" in labels_lower)
