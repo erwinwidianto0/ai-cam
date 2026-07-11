@@ -217,7 +217,7 @@ def run_florence_task(image, task_prompt, text_input=None):
             input_ids=inputs["input_ids"],
             pixel_values=inputs["pixel_values"],
             max_new_tokens=512,
-            num_beams=3
+            num_beams=1  # Menggunakan greedy search (1 beam) agar 3x lebih cepat di CPU
         )
         
     generated_text = florence_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -234,15 +234,15 @@ async def vlm_local(file: bytes = File(...)):
         # Baca gambar dari byte raw JPEG
         image = Image.open(io.BytesIO(file))
         
-        # 1. Dapatkan Deskripsi Detail (Detailed Caption)
+        # 1. Dapatkan Deskripsi Detail (Detailed Caption) - 1 call
         caption_result = run_florence_task(image, "<MORE_DETAILED_CAPTION>")
         description = caption_result.get("<MORE_DETAILED_CAPTION>", "No description available.")
         
-        # 2. Dapatkan deteksi objek kognitif (Phrase Grounding) untuk alarm
+        # 2. Dapatkan deteksi objek kognitif gabungan (Phrase Grounding) - 1 call (total hanya 2 call model)
         grounding_result = run_florence_task(
             image, 
             "<CAPTION_TO_PHRASE_GROUNDING>", 
-            "fire, smoke, person smoking, cigarette, person sleeping, person lying down, mess on floor, items on floor"
+            "fire, smoke, person smoking, cigarette, person sleeping, person lying down, mess on floor, items on floor, person, stove, kitchen cabinet"
         )
         
         parsed_grounding = grounding_result.get("<CAPTION_TO_PHRASE_GROUNDING>", {})
@@ -257,12 +257,8 @@ async def vlm_local(file: bytes = File(...)):
         sleeping_detected = any("sleeping" in l or "lying down" in l or "tidur" in l for l in labels_lower)
         sop_violation_detected = any("mess" in l or "floor" in l or "trash" in l for l in labels_lower)
         
-        # 3. Evaluasi Memasak secara kognitif:
-        # Deteksi jika ada manusia yang berinteraksi dekat dengan kompor (stove / kitchen cabinet)
-        cooking_grounding = run_florence_task(image, "<CAPTION_TO_PHRASE_GROUNDING>", "person, stove, kitchen cabinet")
-        cooking_labels = [l.lower() for l in cooking_grounding.get("<CAPTION_TO_PHRASE_GROUNDING>", {}).get("labels", [])]
-        
-        cooking_detected = "person" in cooking_labels and ("stove" in cooking_labels or "kitchen cabinet" in cooking_labels)
+        # Evaluasi Memasak secara kognitif: manusia berada di dekat kompor/lemari dapur
+        cooking_detected = "person" in labels_lower and ("stove" in labels_lower or "kitchen cabinet" in labels_lower)
 
         return JSONResponse(content={
             "cooking": cooking_detected,

@@ -1427,8 +1427,8 @@ func (sp *StreamProcessor) executeLocalVLM(jpegData []byte) {
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	// Jalankan request HTTP dengan timeout 25 detik
-	client := &http.Client{Timeout: 25 * time.Second}
+	// Jalankan request HTTP dengan timeout 60 detik agar toleran terhadap pemrosesan CPU
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Gagal menghubungi layanan VLM Lokal: %v", err)
